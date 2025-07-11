@@ -48,9 +48,9 @@
                     <i class="fas fa-chart-line"></i>
                     Trends
                 </button>
-                <button class="nav-tab" data-tab="add">
-                    <i class="fas fa-plus"></i>
-                    Add Paper
+                <button class="nav-tab" data-tab="litmaps">
+                    <i class="fas fa-map"></i>
+                    LitMaps
                 </button>
             </div>
         </div>
@@ -99,6 +99,30 @@
                         Clear
                     </button>
                 </div>
+                
+                <div class="selection-controls">
+                    <div class="selection-info">
+                        <span id="selected-count">0</span> papers selected
+                    </div>
+                    <div class="selection-actions">
+                        <button id="select-all" class="select-btn">
+                            <i class="fas fa-check-square"></i>
+                            Select All
+                        </button>
+                        <button id="deselect-all" class="select-btn">
+                            <i class="fas fa-square"></i>
+                            Deselect All
+                        </button>
+                        <button id="download-csv" class="download-btn" disabled>
+                            <i class="fas fa-download"></i>
+                            Download CSV
+                        </button>
+                        <button id="download-ris" class="download-btn" disabled>
+                            <i class="fas fa-download"></i>
+                            Download RIS
+                        </button>
+                    </div>
+                </div>
             </section>
 
             <!-- Content Tabs -->
@@ -136,59 +160,21 @@
                     </div>
                 </div>
 
-                <!-- Add Paper Tab -->
-                <div id="add-tab" class="tab-content">
-                    <div class="add-paper-form">
-                        <h3>Add Paper Manually</h3>
-                        <form id="paper-form">
-                            <div class="form-group">
-                                <label for="paper-title">Title *</label>
-                                <input type="text" id="paper-title" required>
-                            </div>
-                            <div class="form-group">
-                                <label for="paper-authors">Authors *</label>
-                                <input type="text" id="paper-authors" placeholder="Separated by commas" required>
-                            </div>
-                            <div class="form-group">
-                                <label for="paper-year">Year *</label>
-                                <input type="number" id="paper-year" min="2021" max="2025" required>
-                            </div>
-                            <div class="form-group">
-                                <label for="paper-url">URL</label>
-                                <input type="url" id="paper-url">
-                            </div>
-                            <div class="form-group">
-                                <label for="paper-abstract">Abstract</label>
-                                <textarea id="paper-abstract" rows="4"></textarea>
-                            </div>
-                            <div class="form-group">
-                                <label for="paper-type">Type</label>
-                                <select id="paper-type" required>
-                                    <option value="journal">Journal article</option>
-                                    <option value="conference">Conference paper</option>
-                                    <option value="report">Report</option>
-                                    <option value="working-paper">Working paper</option>
-                                    <option value="book">Book</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label for="paper-keywords">Keywords</label>
-                                <input type="text" id="paper-keywords" placeholder="Separated by commas">
-                            </div>
-                            <div class="form-group">
-                                <label for="paper-importance">Importance</label>
-                                <select id="paper-importance">
-                                    <option value="low">Low</option>
-                                    <option value="medium" selected>Medium</option>
-                                    <option value="high">High</option>
-                                    <option value="critical">Critical</option>
-                                </select>
-                            </div>
-                            <button type="submit" class="submit-btn">
-                                <i class="fas fa-plus"></i>
-                                Add Paper
-                            </button>
-                        </form>
+                <!-- LitMaps Tab -->
+                <div id="litmaps-tab" class="tab-content">
+                    <div class="litmaps-container">
+                        <h3>Literature Map</h3>
+                        <p>Interactive visualization of research connections and citations in our field.</p>
+                        <div class="litmaps-embed">
+                            <iframe 
+                                src="https://app.litmaps.com/shared/b55aac42-d7a3-42af-b34b-31c01ac04ce7" 
+                                width="100%" 
+                                height="600" 
+                                frameborder="0" 
+                                allowfullscreen
+                                title="LitMaps - Generative AI and Future of Work Literature Map">
+                            </iframe>
+                        </div>
                     </div>
                 </div>
             </section>

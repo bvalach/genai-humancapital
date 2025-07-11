@@ -73,7 +73,9 @@ const state = {
     lastUpdate: localStorage.getItem('livingReview_lastUpdate') || null,
     // SEGURIDAD: Rate limiting simple
     lastApiCall: 0,
-    minApiInterval: 2000 // 2 segundos entre llamadas
+    minApiInterval: 2000, // 2 segundos entre llamadas
+    // SELECCIÓN: Control de papers seleccionados
+    selectedPapers: new Set()
 };
 
 // ===== UTILIDADES =====
@@ -343,6 +345,144 @@ const utils = {
         setTimeout(() => {
             notification.remove();
         }, 5000);
+    },
+
+    // Generar archivo RIS para descarga
+    generateRISFile(papers) {
+        let risContent = '';
+        
+        papers.forEach(paper => {
+            risContent += 'TY  - ';
+            
+            // Mapear tipos a códigos RIS
+            const typeMap = {
+                'journal': 'JOUR',
+                'conference': 'CONF',
+                'book': 'BOOK',
+                'report': 'RPRT',
+                'working-paper': 'UNPB'
+            };
+            
+            risContent += typeMap[paper.type] || 'JOUR';
+            risContent += '\n';
+            
+            // Título
+            if (paper.title) {
+                risContent += `TI  - ${paper.title}\n`;
+            }
+            
+            // Autores
+            if (paper.authors) {
+                const authors = paper.authors.split(',');
+                authors.forEach(author => {
+                    risContent += `AU  - ${author.trim()}\n`;
+                });
+            }
+            
+            // Año
+            if (paper.year) {
+                risContent += `PY  - ${paper.year}\n`;
+            }
+            
+            // URL
+            if (paper.url) {
+                risContent += `UR  - ${paper.url}\n`;
+            }
+            
+            // DOI
+            if (paper.doi) {
+                risContent += `DO  - ${paper.doi}\n`;
+            }
+            
+            // Abstract
+            if (paper.abstract) {
+                risContent += `AB  - ${paper.abstract}\n`;
+            }
+            
+            // Keywords
+            if (paper.keywords && paper.keywords.length > 0) {
+                paper.keywords.forEach(keyword => {
+                    risContent += `KW  - ${keyword}\n`;
+                });
+            }
+            
+            // Fuente
+            if (paper.source) {
+                risContent += `DB  - ${paper.source}\n`;
+            }
+            
+            // Finalizar registro
+            risContent += 'ER  - \n\n';
+        });
+        
+        return risContent;
+    },
+
+    // Generar archivo CSV para descarga
+    generateCSVFile(papers) {
+        const headers = [
+            'Title',
+            'Authors',
+            'Year',
+            'Type',
+            'Abstract',
+            'URL',
+            'DOI',
+            'Keywords',
+            'Source',
+            'Citations',
+            'Relevance Score'
+        ];
+        
+        let csvContent = headers.join(',') + '\n';
+        
+        papers.forEach(paper => {
+            const row = [
+                this.escapeCSV(paper.title || ''),
+                this.escapeCSV(paper.authors || ''),
+                paper.year || '',
+                this.escapeCSV(paper.type || ''),
+                this.escapeCSV(paper.abstract || ''),
+                this.escapeCSV(paper.url || ''),
+                this.escapeCSV(paper.doi || ''),
+                this.escapeCSV(paper.keywords ? paper.keywords.join('; ') : ''),
+                this.escapeCSV(paper.source || ''),
+                paper.citations || 0,
+                paper.relevanceScore || 0
+            ];
+            
+            csvContent += row.join(',') + '\n';
+        });
+        
+        return csvContent;
+    },
+
+    // Escapar datos para CSV
+    escapeCSV(str) {
+        if (!str) return '';
+        
+        // Convertir a string y escapar comillas
+        str = String(str).replace(/"/g, '""');
+        
+        // Envolver en comillas si contiene comas, saltos de línea o comillas
+        if (str.includes(',') || str.includes('\n') || str.includes('"')) {
+            str = `"${str}"`;
+        }
+        
+        return str;
+    },
+
+    // Descargar archivo
+    downloadFile(content, filename, mimeType) {
+        const blob = new Blob([content], { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
     }
 };
 
@@ -665,6 +805,7 @@ const uiManager = {
         this.bindEvents();
         this.updateStats();
         this.renderPapers();
+        this.updateSelectionControls();
         
         // Auto-refresh si no hay datos
         if (state.papers.length === 0) {
@@ -719,11 +860,7 @@ const uiManager = {
             this.refreshData();
         });
         
-        // Formulario agregar paper
-        document.getElementById('paper-form').addEventListener('submit', (e) => {
-            e.preventDefault();
-            this.handleAddPaper();
-        });
+
 
         // Modal events
         const modal = document.getElementById('modal');
@@ -742,6 +879,23 @@ const uiManager = {
             if (event.key === 'Escape' && modal.style.display === 'block') {
                 this.closeModal();
             }
+        });
+
+        // Eventos de selección
+        document.getElementById('select-all').addEventListener('click', () => {
+            this.selectAllPapers();
+        });
+
+        document.getElementById('deselect-all').addEventListener('click', () => {
+            this.deselectAllPapers();
+        });
+
+        document.getElementById('download-csv').addEventListener('click', () => {
+            this.downloadSelectedPapers('csv');
+        });
+
+        document.getElementById('download-ris').addEventListener('click', () => {
+            this.downloadSelectedPapers('ris');
         });
     },
     
@@ -762,6 +916,9 @@ const uiManager = {
         // Render tab-specific content
         if (tabId === 'trends') {
             this.renderTrends();
+        } else if (tabId === 'litmaps') {
+            // LitMaps tab doesn't need special rendering, iframe loads automatically
+            console.log('LitMaps tab activated');
         }
     },
     
@@ -806,6 +963,7 @@ const uiManager = {
         });
         
         this.renderPagination(filtered.length);
+        this.updateSelectionControls();
     },
 
     // Show improved loading state
@@ -873,6 +1031,19 @@ const uiManager = {
         sourceBadge.className = `paper-source-badge ${sourceClass}`;
         sourceBadge.textContent = paper.source || 'Manual';
         
+        // Checkbox para selección
+        const checkboxContainer = document.createElement('div');
+        checkboxContainer.className = 'paper-checkbox';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.dataset.paperId = paper.id;
+        checkbox.checked = state.selectedPapers.has(paper.id);
+        checkbox.addEventListener('change', (e) => {
+            e.stopPropagation(); // Evitar que se abra el modal
+            this.togglePaperSelection(paper.id, e.target.checked);
+        });
+        checkboxContainer.appendChild(checkbox);
+        
         // Title
         const titleElement = document.createElement('h3');
         titleElement.className = 'paper-title';
@@ -937,6 +1108,7 @@ const uiManager = {
         
         // Ensamblar tarjeta
         card.appendChild(sourceBadge);
+        card.appendChild(checkboxContainer);
         card.appendChild(titleElement);
         card.appendChild(authorsElement);
         card.appendChild(metaElement);
@@ -1224,33 +1396,7 @@ const uiManager = {
         }
     },
     
-    // Manejar agregar paper manualmente
-    handleAddPaper() {
-        const formData = new FormData(document.getElementById('paper-form'));
-        
-        const paper = {
-            title: formData.get('paper-title'),
-            authors: formData.get('paper-authors'),
-            year: parseInt(formData.get('paper-year')),
-            url: formData.get('paper-url'),
-            abstract: formData.get('paper-abstract'),
-            type: formData.get('paper-type'),
-            keywords: formData.get('paper-keywords')?.split(',').map(k => k.trim()).filter(Boolean),
-            importance: formData.get('paper-importance'),
-            source: 'Manual',
-            citations: 0
-        };
-        
-        if (dataManager.addPaper(paper)) {
-            utils.showNotification('Paper added successfully', 'success');
-            document.getElementById('paper-form').reset();
-            this.updateStats();
-            this.switchTab('papers');
-            this.renderPapers();
-        } else {
-            utils.showNotification('This paper already exists in the database', 'error');
-        }
-    },
+
     
 
     
@@ -1371,6 +1517,89 @@ const uiManager = {
                     </div>
                 `;
             }).join('');
+    },
+
+    // ===== FUNCIONES DE SELECCIÓN =====
+    
+    // Alternar selección de paper
+    togglePaperSelection(paperId, isSelected) {
+        if (isSelected) {
+            state.selectedPapers.add(paperId);
+        } else {
+            state.selectedPapers.delete(paperId);
+        }
+        this.updateSelectionControls();
+    },
+
+    // Seleccionar todos los papers visibles
+    selectAllPapers() {
+        const filtered = dataManager.getFilteredPapers();
+        const startIndex = (state.currentPage - 1) * CONFIG.search.itemsPerPage;
+        const endIndex = startIndex + CONFIG.search.itemsPerPage;
+        const paginatedPapers = filtered.slice(startIndex, endIndex);
+        
+        paginatedPapers.forEach(paper => {
+            state.selectedPapers.add(paper.id);
+        });
+        
+        this.updateSelectionControls();
+        this.updateCheckboxes();
+    },
+
+    // Deseleccionar todos los papers
+    deselectAllPapers() {
+        state.selectedPapers.clear();
+        this.updateSelectionControls();
+        this.updateCheckboxes();
+    },
+
+    // Actualizar estado de checkboxes
+    updateCheckboxes() {
+        const checkboxes = document.querySelectorAll('.paper-checkbox input[type="checkbox"]');
+        checkboxes.forEach(checkbox => {
+            const paperId = checkbox.dataset.paperId;
+            checkbox.checked = state.selectedPapers.has(paperId);
+        });
+    },
+
+    // Actualizar controles de selección
+    updateSelectionControls() {
+        const selectedCount = state.selectedPapers.size;
+        const selectedCountElement = document.getElementById('selected-count');
+        const downloadCsvBtn = document.getElementById('download-csv');
+        const downloadRisBtn = document.getElementById('download-ris');
+        
+        selectedCountElement.textContent = selectedCount;
+        
+        const hasSelection = selectedCount > 0;
+        downloadCsvBtn.disabled = !hasSelection;
+        downloadRisBtn.disabled = !hasSelection;
+    },
+
+    // Descargar papers seleccionados
+    downloadSelectedPapers(format) {
+        const selectedPapers = state.papers.filter(paper => 
+            state.selectedPapers.has(paper.id)
+        );
+        
+        if (selectedPapers.length === 0) {
+            utils.showNotification('No papers selected for download', 'error');
+            return;
+        }
+        
+        const timestamp = new Date().toISOString().split('T')[0];
+        
+        if (format === 'csv') {
+            const csvContent = utils.generateCSVFile(selectedPapers);
+            const filename = `generative-ai-papers-${timestamp}.csv`;
+            utils.downloadFile(csvContent, filename, 'text/csv;charset=utf-8;');
+            utils.showNotification(`Downloaded ${selectedPapers.length} papers as CSV`, 'success');
+        } else if (format === 'ris') {
+            const risContent = utils.generateRISFile(selectedPapers);
+            const filename = `generative-ai-papers-${timestamp}.ris`;
+            utils.downloadFile(risContent, filename, 'application/x-research-info-systems;charset=utf-8;');
+            utils.showNotification(`Downloaded ${selectedPapers.length} papers as RIS`, 'success');
+        }
     }
 };
 
