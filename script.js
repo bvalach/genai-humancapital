@@ -70,7 +70,10 @@ const state = {
         sort: 'relevance'
     },
     loading: false,
-    lastUpdate: localStorage.getItem('livingReview_lastUpdate') || null
+    lastUpdate: localStorage.getItem('livingReview_lastUpdate') || null,
+    // SEGURIDAD: Rate limiting simple
+    lastApiCall: 0,
+    minApiInterval: 2000 // 2 segundos entre llamadas
 };
 
 // ===== UTILIDADES =====
@@ -141,6 +144,61 @@ const utils = {
     truncateText(text, maxLength = 1000) {
         if (!text) return '';
         return text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
+    },
+
+    // NUEVA: Validación segura de entrada
+    validateInput(value, type, maxLength = 1000) {
+        if (!value) return '';
+        
+        // Convertir a string y limpiar
+        const cleanValue = String(value).trim();
+        
+        // Validar longitud
+        if (cleanValue.length > maxLength) {
+            return cleanValue.substring(0, maxLength);
+        }
+        
+        // Validaciones por tipo
+        switch (type) {
+            case 'email':
+                const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                return emailRegex.test(cleanValue) ? cleanValue : '';
+            case 'year':
+                const year = parseInt(cleanValue);
+                return (year >= 1900 && year <= 2030) ? year : 0;
+            case 'number':
+                const num = parseInt(cleanValue);
+                return !isNaN(num) && num >= 0 ? num : 0;
+            case 'text':
+            default:
+                return this.escapeHtml(cleanValue);
+        }
+    },
+
+    // NUEVA: Validación segura de objetos
+    validatePaperData(paper) {
+        if (!paper || typeof paper !== 'object') return null;
+        
+        return {
+            id: paper.id || this.generateId(),
+            title: this.validateInput(paper.title, 'text', 500),
+            authors: this.validateInput(paper.authors, 'text', 1000),
+            year: this.validateInput(paper.year, 'year'),
+            abstract: this.validateInput(paper.abstract, 'text', 5000),
+            url: this.sanitizeUrl(paper.url),
+            doi: this.sanitizeDoi(paper.doi),
+            type: this.validateInput(paper.type, 'text', 50),
+            source: this.validateInput(paper.source, 'text', 100),
+            citations: this.validateInput(paper.citations, 'number'),
+            keywords: Array.isArray(paper.keywords) ? 
+                paper.keywords.map(k => this.validateInput(k, 'text', 100)).filter(Boolean) : 
+                [],
+            importance: paper.importance || 'medium',
+            categories: Array.isArray(paper.categories) ? 
+                paper.categories.map(c => this.validateInput(c, 'text', 100)).filter(Boolean) : 
+                [],
+            relevanceScore: this.validateInput(paper.relevanceScore, 'number')
+        };
     },
 
     // Categorizar papers automáticamente
@@ -402,6 +460,17 @@ const apiService = {
     
     // Search primarily through CrossRef with additional sources
     async searchAllAPIs(query) {
+        // SEGURIDAD: Rate limiting básico
+        const now = Date.now();
+        const timeSinceLastCall = now - state.lastApiCall;
+        
+        if (timeSinceLastCall < state.minApiInterval) {
+            console.log('Rate limited, waiting...');
+            await new Promise(resolve => setTimeout(resolve, state.minApiInterval - timeSinceLastCall));
+        }
+        
+        state.lastApiCall = Date.now();
+        
         const [crossrefResults, semanticResults, openalexResults] = await Promise.allSettled([
             this.searchCrossRef(query),
             this.searchSemanticScholar(query),
@@ -495,24 +564,28 @@ const dataManager = {
     
     // Add paper - All papers in unified list
     addPaper(paper) {
-        paper.id = paper.id || utils.generateId();
-        paper.addedDate = new Date().toISOString();
-        paper.relevanceScore = utils.calculateRelevanceScore(paper);
-        paper.categories = paper.categories || utils.categorizePaper(paper);
-        paper.isGrayLit = paper.isGrayLit !== undefined ? paper.isGrayLit : utils.isGrayLiterature(paper);
+        // SEGURIDAD: Validar y limpiar datos del paper
+        const validatedPaper = utils.validatePaperData(paper);
+        if (!validatedPaper || !validatedPaper.title) return false;
+        
+        validatedPaper.id = validatedPaper.id || utils.generateId();
+        validatedPaper.addedDate = new Date().toISOString();
+        validatedPaper.relevanceScore = utils.calculateRelevanceScore(validatedPaper);
+        validatedPaper.categories = validatedPaper.categories || utils.categorizePaper(validatedPaper);
+        validatedPaper.isGrayLit = validatedPaper.isGrayLit !== undefined ? validatedPaper.isGrayLit : utils.isGrayLiterature(validatedPaper);
         
         // Check for duplicates in papers list
-        const cleanTitle = utils.cleanText(paper.title);
+        const cleanTitle = utils.cleanText(validatedPaper.title);
         const existsInPapers = state.papers.some(p => 
             utils.cleanText(p.title) === cleanTitle
         );
         
         if (!existsInPapers) {
             // Add all papers to unified list
-            state.papers.unshift(paper);
+            state.papers.unshift(validatedPaper);
             // Also add to grey literature count if it's grey lit
-            if (paper.isGrayLit && !state.grayLiterature.some(p => utils.cleanText(p.title) === cleanTitle)) {
-                state.grayLiterature.unshift(paper);
+            if (validatedPaper.isGrayLit && !state.grayLiterature.some(p => utils.cleanText(p.title) === cleanTitle)) {
+                state.grayLiterature.unshift(validatedPaper);
             }
             this.saveToStorage();
             return true;
@@ -1207,7 +1280,7 @@ const uiManager = {
         
         container.innerHTML = sortedTopics.map(([topic, count]) => 
             `<span class="topic-tag" style="font-size: ${Math.min(12 + count * 2, 24)}px">
-                ${topic} (${count})
+                ${utils.escapeHtml(topic)} (${count})
              </span>`
         ).join('');
     },
@@ -1233,7 +1306,7 @@ const uiManager = {
         
         container.innerHTML = sortedAuthors.map(([author, count]) => 
             `<div class="author-item">
-                <span class="author-name">${author}</span>
+                <span class="author-name">${utils.escapeHtml(author)}</span>
                 <span class="author-count">${count} papers</span>
              </div>`
         ).join('');
@@ -1257,7 +1330,7 @@ const uiManager = {
                 const percentage = ((count / total) * 100).toFixed(1);
                 return `
                     <div class="source-item">
-                        <span class="source-name">${source}</span>
+                        <span class="source-name">${utils.escapeHtml(source)}</span>
                         <div class="source-bar">
                             <div class="source-fill" style="width: ${percentage}%"></div>
                         </div>
@@ -1290,7 +1363,7 @@ const uiManager = {
                 const percentage = ((count / total) * 100).toFixed(1);
                 return `
                     <div class="source-item">
-                        <span class="source-name">${type}</span>
+                        <span class="source-name">${utils.escapeHtml(type)}</span>
                         <div class="source-bar">
                             <div class="source-fill" style="width: ${percentage}%"></div>
                         </div>
