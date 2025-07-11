@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Living Review: Generative AI and the Future of Work | Dra. Beatriz Vallina</title>
+    <meta name="description" content="Dynamic literature review on the impact of generative artificial intelligence on employment and the future of work. PhD research by Dra. Beatriz Vallina, Universitat Politècnica de València">
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Raleway:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="container">
+            <div class="header-content">
+                <h1 class="title">
+                    Living Review: Generative AI and the Future of Work
+                </h1>
+                <p class="subtitle">Dynamic literature review encompassing academic papers and grey literature on AI's impact on employment</p>
+                <div class="header-stats">
+                    <div class="stat">
+                        <span class="stat-number" id="total-papers">0</span>
+                        <span class="stat-label">Papers</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-number" id="last-update">-</span>
+                        <span class="stat-label">Last Updated</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-number" id="gray-literature">0</span>
+                        <span class="stat-label">Grey Literature</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Navigation -->
+    <nav class="nav">
+        <div class="container">
+            <div class="nav-tabs">
+                <button class="nav-tab active" data-tab="papers">
+                    <i class="fas fa-file-alt"></i>
+                    Academic Papers
+                </button>
+                <button class="nav-tab" data-tab="trends">
+                    <i class="fas fa-chart-line"></i>
+                    Trends
+                </button>
+                <button class="nav-tab" data-tab="add">
+                    <i class="fas fa-plus"></i>
+                    Add Paper
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="main">
+        <div class="container">
+            <!-- Controls -->
+            <section class="controls">
+                <div class="search-box">
+                    <i class="fas fa-search"></i>
+                    <input type="text" id="search-input" placeholder="Search by title, author, keywords...">
+                    <button id="refresh-btn" class="refresh-btn" title="Update from APIs">
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
+                </div>
+                
+                <div class="filters">
+                    <select id="year-filter">
+                        <option value="">All years</option>
+                        <option value="2025">2025</option>
+                        <option value="2024">2024</option>
+                        <option value="2023">2023</option>
+                        <option value="2022">2022</option>
+                    </select>
+                    
+                    <select id="type-filter">
+                        <option value="">All types</option>
+                        <option value="journal">Journal article</option>
+                        <option value="conference">Conference paper</option>
+                        <option value="report">Report</option>
+                        <option value="working-paper">Working paper</option>
+                        <option value="book">Book</option>
+                    </select>
+                    
+                    <select id="sort-filter">
+                        <option value="relevance">Relevance</option>
+                        <option value="date">Date</option>
+                        <option value="citations">Citations</option>
+                        <option value="impact">Impact</option>
+                    </select>
+                    
+                    <button id="clear-filters" class="clear-btn">
+                        <i class="fas fa-times"></i>
+                        Clear
+                    </button>
+                </div>
+            </section>
+
+            <!-- Content Tabs -->
+            <section class="content-tabs">
+                <!-- Papers Tab -->
+                <div id="papers-tab" class="tab-content active">
+                    <div class="papers-grid" id="papers-grid">
+                        <div class="loading" id="loading">
+                            <i class="fas fa-spinner fa-spin"></i>
+                            <p>Loading papers...</p>
+                        </div>
+                    </div>
+                    <div class="pagination" id="pagination"></div>
+                </div>
+
+                <!-- Trends Tab -->
+                <div id="trends-tab" class="tab-content">
+                    <div class="trends-container">
+                        <div class="trend-card">
+                            <h3>Main Topics</h3>
+                            <div id="topics-cloud"></div>
+                        </div>
+                        <div class="trend-card">
+                            <h3>Leading Authors</h3>
+                            <div id="authors-list"></div>
+                        </div>
+                        <div class="trend-card">
+                            <h3>Data Sources</h3>
+                            <div id="sources-breakdown"></div>
+                        </div>
+                        <div class="trend-card">
+                            <h3>Publication Types</h3>
+                            <div id="types-breakdown"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Add Paper Tab -->
+                <div id="add-tab" class="tab-content">
+                    <div class="add-paper-form">
+                        <h3>Add Paper Manually</h3>
+                        <form id="paper-form">
+                            <div class="form-group">
+                                <label for="paper-title">Title *</label>
+                                <input type="text" id="paper-title" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="paper-authors">Authors *</label>
+                                <input type="text" id="paper-authors" placeholder="Separated by commas" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="paper-year">Year *</label>
+                                <input type="number" id="paper-year" min="2021" max="2025" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="paper-url">URL</label>
+                                <input type="url" id="paper-url">
+                            </div>
+                            <div class="form-group">
+                                <label for="paper-abstract">Abstract</label>
+                                <textarea id="paper-abstract" rows="4"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label for="paper-type">Type</label>
+                                <select id="paper-type" required>
+                                    <option value="journal">Journal article</option>
+                                    <option value="conference">Conference paper</option>
+                                    <option value="report">Report</option>
+                                    <option value="working-paper">Working paper</option>
+                                    <option value="book">Book</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="paper-keywords">Keywords</label>
+                                <input type="text" id="paper-keywords" placeholder="Separated by commas">
+                            </div>
+                            <div class="form-group">
+                                <label for="paper-importance">Importance</label>
+                                <select id="paper-importance">
+                                    <option value="low">Low</option>
+                                    <option value="medium" selected>Medium</option>
+                                    <option value="high">High</option>
+                                    <option value="critical">Critical</option>
+                                </select>
+                            </div>
+                            <button type="submit" class="submit-btn">
+                                <i class="fas fa-plus"></i>
+                                Add Paper
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>&copy; 2025 Living Review - Generative AI and the Future of Work</p>
+            <p><strong>Research by:</strong> <a href="https://www.linkedin.com/in/beatrizvallina/" target="_blank">Beatriz Vallina, PhD</a></p>
+            <p><strong>Thesis Supervisors:</strong> Roberto Cervelló, Prof.PhD & Juan José Llul, PhD</p>
+            <p><strong>Institution:</strong> Doctorate in Agrifood Economics, Universitat Politècnica de València</p>
+            <p><strong>Related Work:</strong> <a href="https://bvalach.github.io/genai-agrifood/index.html" target="_blank">Living Review on Generative AI in the Food Chain</a></p>
+            <p><strong>Sources:</strong> Semantic Scholar, CrossRef, OpenAlex, World Bank, OECD, McKinsey Global Institute</p>
+        </div>
+    </footer>
+
+    <!-- Modal -->
+    <div id="modal" class="modal">
+        <div class="modal-content">
+            <span class="close-button">&times;</span>
+            <h2 id="modal-title"></h2>
+            <p id="modal-authors"></p>
+            <p id="modal-date"></p>
+            <p id="modal-doi" style="display: none;"></p>
+            <div id="modal-categories"></div>
+            <p id="modal-abstract"></p>
+            <div class="modal-actions">
+                <a id="modal-link" href="#" target="_blank" rel="noopener noreferrer" class="modal-btn primary">
+                    <i class="fas fa-external-link-alt"></i>
+                    View Paper
+                </a>
+                <button id="modal-cite" class="modal-btn secondary">
+                    <i class="fas fa-quote-right"></i>
+                    Copy Citation
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="script.js"></script>
+</body>
+</html> 

@@ -1,0 +1,1318 @@
+/**
+ * Living Review: Generative AI and the Future of Work
+ * Main JavaScript with API integration and complete functionality
+ */
+
+// ===== CONFIGURACIÓN GLOBAL =====
+const CONFIG = {
+    // APIs académicas (sin necesidad de autenticación)
+    apis: {
+        semanticScholar: 'https://api.semanticscholar.org/graph/v1',
+        crossref: 'https://api.crossref.org/works',
+        openAlex: 'https://api.openalex.org/works',
+        arxiv: 'https://export.arxiv.org/api/query'
+    },
+    
+    // Keywords para búsqueda automática
+    keywords: [
+        'artificial intelligence jobs',
+        'generative AI employment',
+        'AI automation workforce',
+        'machine learning labor market',
+        'agentic AI future work',
+        'ChatGPT employment impact',
+        'large language models jobs',
+        'AI displacement workers'
+    ],
+    
+    // Configuración de búsqueda
+    search: {
+        maxResults: 100,
+        minYear: 2021,  // Últimos 4 años para capturar la evolución de IA generativa
+        maxYear: 2025,
+        itemsPerPage: 12
+    },
+    
+    // Fuentes de literatura gris
+    graySources: {
+        worldBank: {
+            name: 'Banco Mundial',
+            rss: 'https://openknowledge.worldbank.org/feed',
+            keywords: ['future of work', 'artificial intelligence', 'employment']
+        },
+        oecd: {
+            name: 'OCDE',
+            rss: 'https://www.oecd.org/rss/general.xml',
+            keywords: ['AI', 'employment', 'automation']
+        },
+        mckinsey: {
+            name: 'McKinsey Global Institute',
+            keywords: ['automation', 'AI', 'workforce']
+        },
+        brookings: {
+            name: 'Brookings Institution',
+            rss: 'https://www.brookings.edu/feed/',
+            keywords: ['artificial intelligence', 'jobs']
+        }
+    }
+};
+
+// ===== ESTADO GLOBAL =====
+const state = {
+    papers: JSON.parse(localStorage.getItem('livingReview_papers') || '[]'),
+    grayLiterature: JSON.parse(localStorage.getItem('livingReview_gray') || '[]'),
+    currentTab: 'papers',
+    currentPage: 1,
+    filters: {
+        search: '',
+        year: '',
+        type: '',
+        sort: 'relevance'
+    },
+    loading: false,
+    lastUpdate: localStorage.getItem('livingReview_lastUpdate') || null
+};
+
+// ===== UTILIDADES =====
+const utils = {
+    // Debounce para búsquedas
+    debounce(func, wait) {
+        let timeout;
+        return function executedFunction(...args) {
+            const later = () => {
+                clearTimeout(timeout);
+                func(...args);
+            };
+            clearTimeout(timeout);
+            timeout = setTimeout(later, wait);
+        };
+    },
+    
+    // Format date
+    formatDate(date) {
+        return new Date(date).toLocaleDateString('en-GB', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric'
+        });
+    },
+    
+    // Generar ID único
+    generateId() {
+        return Math.random().toString(36).substr(2, 9);
+    },
+    
+    // Limpiar texto
+    cleanText(text) {
+        return text ? text.replace(/[^\w\s]/gi, '').toLowerCase() : '';
+    },
+
+    // FUNCIONES DE SEGURIDAD (basadas en el ejemplo exitoso)
+    escapeHtml(unsafe) {
+        if (!unsafe) return '';
+        return unsafe
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    },
+
+    sanitizeUrl(url) {
+        if (!url) return '#';
+        
+        try {
+            const urlObj = new URL(url);
+            if (urlObj.protocol === 'https:' || urlObj.protocol === 'http:') {
+                return url;
+            }
+        } catch (e) {
+            console.warn('Invalid URL detected:', url);
+        }
+        return '#';
+    },
+
+    sanitizeDoi(doi) {
+        if (!doi) return '';
+        const doiPattern = /^10\.\d{4,}\/[^\s]+$/;
+        return doiPattern.test(doi) ? doi : '';
+    },
+
+    truncateText(text, maxLength = 1000) {
+        if (!text) return '';
+        return text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
+    },
+
+    // Categorizar papers automáticamente
+    categorizePaper(paper) {
+        const text = `${paper.title || ''} ${paper.abstract || ''}`.toLowerCase();
+        const categories = [];
+        
+        const categoryKeywords = {
+            'AI & Employment': ['artificial intelligence jobs', 'ai employment', 'automation employment', 'job displacement'],
+            'Generative AI': ['generative AI', 'large language model', 'chatgpt', 'llm', 'generative adversarial'],
+            'Future of Work': ['future of work', 'workforce transformation', 'human-ai collaboration', 'job automation'],
+            'Labor Economics': ['labor market', 'employment economics', 'wage effects', 'productivity'],
+            'Reskilling': ['reskilling', 'upskilling', 'skill development', 'workforce training'],
+            'Policy & Regulation': ['ai policy', 'regulation', 'governance', 'ethics'],
+            'Industry Impact': ['manufacturing automation', 'service jobs', 'knowledge work', 'professional services']
+        };
+        
+        for (const [category, keywords] of Object.entries(categoryKeywords)) {
+            if (keywords.some(keyword => text.includes(keyword.toLowerCase()))) {
+                categories.push(category);
+            }
+        }
+        
+        return categories.length > 0 ? categories : ['General'];
+    },
+
+    // Determinar si es literatura gris
+    isGrayLiterature(paper) {
+        const grayLitSources = [
+            'world bank', 'banco mundial', 'oecd', 'ocde', 
+            'mckinsey', 'brookings', 'imf', 'fmi',
+            'wef', 'world economic forum', 'united nations',
+            'european commission', 'government', 'ministry',
+            'pwc', 'deloitte', 'kpmg', 'accenture',
+            'institute', 'foundation', 'council', 'centre',
+            'organization', 'organisation', 'commission'
+        ];
+        
+        const source = (paper.source || '').toLowerCase();
+        const authors = (paper.authors || '').toLowerCase();
+        const title = (paper.title || '').toLowerCase();
+        const abstract = (paper.abstract || '').toLowerCase();
+        
+        // Check if it's a report type
+        if (paper.type === 'report') return true;
+        
+        // Check for grey literature indicators in text
+        const grayLitIndicators = [
+            'working paper', 'policy paper', 'white paper',
+            'technical report', 'research report', 'policy brief',
+            'discussion paper', 'occasional paper', 'staff paper'
+        ];
+        
+        const hasGrayIndicator = grayLitIndicators.some(indicator =>
+            title.includes(indicator) || abstract.includes(indicator)
+        );
+        
+        return grayLitSources.some(graySource => 
+            source.includes(graySource) || 
+            authors.includes(graySource) || 
+            title.includes(graySource)
+        ) || hasGrayIndicator;
+    },
+    
+    // Calcular score de relevancia
+    calculateRelevanceScore(paper) {
+        let score = 0;
+        
+        // Score por citas (max 30 puntos)
+        const citations = paper.citations || 0;
+        score += Math.min(citations / 10, 30);
+        
+        // Score por año (más reciente = más puntos, max 25 puntos)
+        const year = paper.year || 2021;
+        const yearScore = ((year - 2021) / (2025 - 2021)) * 25;
+        score += yearScore;
+        
+        // Score por keywords relevantes (max 25 puntos)
+        const title = utils.cleanText(paper.title || '');
+        const abstract = utils.cleanText(paper.abstract || '');
+        const keywordMatches = CONFIG.keywords.filter(keyword => 
+            title.includes(utils.cleanText(keyword)) || 
+            abstract.includes(utils.cleanText(keyword))
+        ).length;
+        score += (keywordMatches / CONFIG.keywords.length) * 25;
+        
+        // Score por tipo de publicación (max 20 puntos)
+        const typeScores = {
+            'journal': 20,
+            'conference': 15,
+            'report': 18,
+            'working-paper': 12,
+            'book': 16
+        };
+        score += typeScores[paper.type] || 10;
+        
+        return Math.min(Math.round(score), 100);
+    },
+    
+    // Mostrar notificación
+    showNotification(message, type = 'info') {
+        const notification = document.createElement('div');
+        notification.className = `notification notification-${type}`;
+        notification.innerHTML = `
+            <i class="fas fa-${type === 'success' ? 'check' : type === 'error' ? 'exclamation' : 'info'}-circle"></i>
+            <span>${message}</span>
+        `;
+        
+        // Agregar estilos dinámicamente si no existen
+        if (!document.querySelector('#notification-styles')) {
+            const styles = document.createElement('style');
+            styles.id = 'notification-styles';
+            styles.textContent = `
+                .notification {
+                    position: fixed;
+                    top: 20px;
+                    right: 20px;
+                    padding: 12px 20px;
+                    border-radius: 8px;
+                    color: white;
+                    font-size: 14px;
+                    font-weight: 500;
+                    z-index: 1000;
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    animation: slideIn 0.3s ease-out;
+                }
+                .notification-success { background: #4ade80; }
+                .notification-error { background: #ef4444; }
+                .notification-info { background: #ECF6CE; color: #2c2c2c; }
+                @keyframes slideIn {
+                    from { transform: translateX(100%); opacity: 0; }
+                    to { transform: translateX(0); opacity: 1; }
+                }
+            `;
+            document.head.appendChild(styles);
+        }
+        
+        document.body.appendChild(notification);
+        
+        setTimeout(() => {
+            notification.remove();
+        }, 5000);
+    }
+};
+
+// ===== API SERVICES =====
+const apiService = {
+    // Semantic Scholar API
+    async searchSemanticScholar(query, limit = 50) {
+        try {
+            const url = `${CONFIG.apis.semanticScholar}/paper/search?query=${encodeURIComponent(query)}&limit=${limit}&fields=title,abstract,year,authors,citationCount,url,publicationTypes`;
+            const response = await fetch(url);
+            const data = await response.json();
+            
+            return data.data?.map(paper => ({
+                id: paper.paperId || utils.generateId(),
+                title: paper.title,
+                authors: paper.authors?.map(a => a.name).join(', ') || 'Unknown',
+                year: paper.year,
+                abstract: paper.abstract,
+                citations: paper.citationCount || 0,
+                url: paper.url,
+                type: this.mapPublicationType(paper.publicationTypes),
+                source: 'Semantic Scholar',
+                addedDate: new Date().toISOString()
+            })) || [];
+        } catch (error) {
+            console.error('Error en Semantic Scholar:', error);
+            return [];
+        }
+    },
+    
+    // CrossRef API - Mejorado para mejor filtrado y manejo de errores
+    async searchCrossRef(query, limit = 50) {
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
+            
+            const url = `${CONFIG.apis.crossref}?query=${encodeURIComponent(query)}&rows=${limit}&filter=from-pub-date:2021,until-pub-date:2025&sort=published&order=desc`;
+            
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: {
+                    'Accept': 'application/json',
+                },
+                signal: controller.signal
+            });
+
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const data = await response.json();
+            
+            if (!data || !data.message || !data.message.items) {
+                return [];
+            }
+            
+            return data.message.items
+                .filter(item => item && item.title && item.title[0])
+                .slice(0, limit)
+                .map(item => {
+                    const paper = {
+                        id: utils.sanitizeDoi(item.DOI) || utils.generateId(),
+                        title: utils.truncateText(item.title[0], 300),
+                        authors: item.author?.map(a => 
+                            utils.truncateText(`${a.given || ''} ${a.family || ''}`.trim(), 100)
+                        ).filter(name => name).join(', ') || 'Unknown',
+                        year: item.published?.['date-parts']?.[0]?.[0],
+                        abstract: utils.truncateText(item.abstract, 2000),
+                        citations: Math.max(0, item['is-referenced-by-count'] || 0),
+                        url: utils.sanitizeUrl(item.URL),
+                        doi: utils.sanitizeDoi(item.DOI),
+                        type: this.mapCrossRefType(item.type),
+                        source: 'CrossRef',
+                        addedDate: new Date().toISOString()
+                    };
+                    
+                    // Añadir categorías automáticamente
+                    paper.categories = utils.categorizePaper(paper);
+                    paper.isGrayLit = utils.isGrayLiterature(paper);
+                    
+                    return paper;
+                });
+        } catch (error) {
+            console.error('Error en CrossRef:', error);
+            return [];
+        }
+    },
+    
+    // OpenAlex API
+    async searchOpenAlex(query, limit = 50) {
+        try {
+            const url = `${CONFIG.apis.openAlex}?search=${encodeURIComponent(query)}&per-page=${limit}&filter=publication_year:2020-${new Date().getFullYear()}`;
+            const response = await fetch(url);
+            const data = await response.json();
+            
+            return data.results?.map(work => ({
+                id: work.id || utils.generateId(),
+                title: work.display_name,
+                authors: work.authorships?.map(a => a.author?.display_name).filter(Boolean).join(', ') || 'Unknown',
+                year: work.publication_year,
+                abstract: work.abstract_inverted_index ? this.reconstructAbstract(work.abstract_inverted_index) : null,
+                citations: work.cited_by_count || 0,
+                url: work.primary_location?.landing_page_url,
+                type: this.mapOpenAlexType(work.type),
+                source: 'OpenAlex',
+                addedDate: new Date().toISOString()
+            })) || [];
+        } catch (error) {
+            console.error('Error en OpenAlex:', error);
+            return [];
+        }
+    },
+    
+    // Search primarily through CrossRef with additional sources
+    async searchAllAPIs(query) {
+        const [crossrefResults, semanticResults, openalexResults] = await Promise.allSettled([
+            this.searchCrossRef(query),
+            this.searchSemanticScholar(query),
+            this.searchOpenAlex(query)
+        ]);
+        
+        const allResults = [
+            ...(crossrefResults.status === 'fulfilled' ? crossrefResults.value : []),
+            ...(semanticResults.status === 'fulfilled' ? semanticResults.value : []),
+            ...(openalexResults.status === 'fulfilled' ? openalexResults.value : [])
+        ];
+        
+        // Eliminar duplicados basados en título
+        const uniqueResults = [];
+        const seenTitles = new Set();
+        
+        for (const paper of allResults) {
+            const cleanTitle = utils.cleanText(paper.title || '');
+            if (cleanTitle && !seenTitles.has(cleanTitle)) {
+                seenTitles.add(cleanTitle);
+                paper.relevanceScore = utils.calculateRelevanceScore(paper);
+                uniqueResults.push(paper);
+            }
+        }
+        
+        return uniqueResults.sort((a, b) => b.relevanceScore - a.relevanceScore);
+    },
+    
+    // Mapear tipos de publicación
+    mapPublicationType(types) {
+        if (!types || !Array.isArray(types)) return 'journal';
+        const type = types[0]?.toLowerCase() || '';
+        if (type.includes('conference')) return 'conference';
+        if (type.includes('journal')) return 'journal';
+        if (type.includes('book')) return 'book';
+        return 'journal';
+    },
+    
+    mapCrossRefType(type) {
+        const typeMap = {
+            'journal-article': 'journal',
+            'proceedings-article': 'conference',
+            'book-chapter': 'book',
+            'book': 'book',
+            'report': 'report',
+            'report-series': 'report',
+            'other': 'report',
+            'dataset': 'report',
+            'standard': 'report',
+            'reference-book': 'book',
+            'monograph': 'book',
+            'edited-book': 'book'
+        };
+        return typeMap[type] || 'working-paper';
+    },
+    
+    mapOpenAlexType(type) {
+        const typeMap = {
+            'article': 'journal',
+            'book': 'book',
+            'dataset': 'report',
+            'thesis': 'report'
+        };
+        return typeMap[type] || 'journal';
+    },
+    
+    // Reconstruir abstract de OpenAlex
+    reconstructAbstract(invertedIndex) {
+        if (!invertedIndex) return null;
+        
+        const words = [];
+        for (const [word, positions] of Object.entries(invertedIndex)) {
+            for (const pos of positions) {
+                words[pos] = word;
+            }
+        }
+        
+        return words.filter(Boolean).join(' ').substring(0, 500);
+    }
+};
+
+// ===== GESTIÓN DE DATOS =====
+const dataManager = {
+    // Guardar en localStorage
+    saveToStorage() {
+        localStorage.setItem('livingReview_papers', JSON.stringify(state.papers));
+        localStorage.setItem('livingReview_gray', JSON.stringify(state.grayLiterature));
+        localStorage.setItem('livingReview_lastUpdate', new Date().toISOString());
+        state.lastUpdate = new Date().toISOString();
+    },
+    
+    // Add paper - All papers in unified list
+    addPaper(paper) {
+        paper.id = paper.id || utils.generateId();
+        paper.addedDate = new Date().toISOString();
+        paper.relevanceScore = utils.calculateRelevanceScore(paper);
+        paper.categories = paper.categories || utils.categorizePaper(paper);
+        paper.isGrayLit = paper.isGrayLit !== undefined ? paper.isGrayLit : utils.isGrayLiterature(paper);
+        
+        // Check for duplicates in papers list
+        const cleanTitle = utils.cleanText(paper.title);
+        const existsInPapers = state.papers.some(p => 
+            utils.cleanText(p.title) === cleanTitle
+        );
+        
+        if (!existsInPapers) {
+            // Add all papers to unified list
+            state.papers.unshift(paper);
+            // Also add to grey literature count if it's grey lit
+            if (paper.isGrayLit && !state.grayLiterature.some(p => utils.cleanText(p.title) === cleanTitle)) {
+                state.grayLiterature.unshift(paper);
+            }
+            this.saveToStorage();
+            return true;
+        }
+        return false;
+    },
+    
+    // Agregar múltiples papers
+    addPapers(papers) {
+        let addedCount = 0;
+        papers.forEach(paper => {
+            if (this.addPaper(paper)) {
+                addedCount++;
+            }
+        });
+        return addedCount;
+    },
+    
+    // Filtrar papers
+    getFilteredPapers() {
+        let filtered = [...state.papers];
+        
+        // Filtro de búsqueda
+        if (state.filters.search) {
+            const searchTerm = utils.cleanText(state.filters.search);
+            filtered = filtered.filter(paper => 
+                utils.cleanText(paper.title || '').includes(searchTerm) ||
+                utils.cleanText(paper.authors || '').includes(searchTerm) ||
+                utils.cleanText(paper.abstract || '').includes(searchTerm)
+            );
+        }
+        
+        // Filtro de año
+        if (state.filters.year) {
+            filtered = filtered.filter(paper => 
+                paper.year && paper.year.toString() === state.filters.year
+            );
+        }
+        
+        // Filtro de tipo
+        if (state.filters.type) {
+            filtered = filtered.filter(paper => paper.type === state.filters.type);
+        }
+        
+        // Ordenamiento
+        switch (state.filters.sort) {
+            case 'date':
+                filtered.sort((a, b) => (b.year || 0) - (a.year || 0));
+                break;
+            case 'citations':
+                filtered.sort((a, b) => (b.citations || 0) - (a.citations || 0));
+                break;
+            case 'impact':
+                filtered.sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0));
+                break;
+            default: // relevance
+                filtered.sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0));
+        }
+        
+        return filtered;
+    },
+    
+    // Get statistics
+    getStats() {
+        return {
+            totalPapers: state.papers.length,
+            grayLiterature: state.grayLiterature.length,
+            lastUpdate: state.lastUpdate ? utils.formatDate(state.lastUpdate) : 'Never'
+        };
+    }
+};
+
+// ===== GESTIÓN DE UI =====
+const uiManager = {
+    // Inicializar eventos
+    init() {
+        this.bindEvents();
+        this.updateStats();
+        this.renderPapers();
+        
+        // Auto-refresh si no hay datos
+        if (state.papers.length === 0) {
+            this.refreshData();
+        }
+    },
+    
+    // Vincular eventos
+    bindEvents() {
+        // Navegación entre tabs
+        document.querySelectorAll('.nav-tab').forEach(tab => {
+            tab.addEventListener('click', (e) => {
+                const tabId = e.target.closest('.nav-tab').dataset.tab;
+                this.switchTab(tabId);
+            });
+        });
+        
+        // Búsqueda
+        const searchInput = document.getElementById('search-input');
+        searchInput.addEventListener('input', utils.debounce((e) => {
+            state.filters.search = e.target.value;
+            state.currentPage = 1;
+            this.renderPapers();
+        }, 300));
+        
+        // Filtros
+        ['year-filter', 'type-filter', 'sort-filter'].forEach(filterId => {
+            const element = document.getElementById(filterId);
+            element.addEventListener('change', (e) => {
+                const filterType = filterId.split('-')[0];
+                state.filters[filterType] = e.target.value;
+                state.currentPage = 1;
+                this.renderPapers();
+            });
+        });
+        
+        // Limpiar filtros
+        document.getElementById('clear-filters').addEventListener('click', () => {
+            state.filters = { search: '', year: '', type: '', sort: 'relevance' };
+            state.currentPage = 1;
+            
+            document.getElementById('search-input').value = '';
+            document.getElementById('year-filter').value = '';
+            document.getElementById('type-filter').value = '';
+            document.getElementById('sort-filter').value = 'relevance';
+            
+            this.renderPapers();
+        });
+        
+        // Refresh
+        document.getElementById('refresh-btn').addEventListener('click', () => {
+            this.refreshData();
+        });
+        
+        // Formulario agregar paper
+        document.getElementById('paper-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.handleAddPaper();
+        });
+
+        // Modal events
+        const modal = document.getElementById('modal');
+        const closeButton = document.querySelector('.close-button');
+        
+        closeButton.addEventListener('click', () => this.closeModal());
+        
+        window.addEventListener('click', (event) => {
+            if (event.target === modal) {
+                this.closeModal();
+            }
+        });
+
+        // Soporte para teclado
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && modal.style.display === 'block') {
+                this.closeModal();
+            }
+        });
+    },
+    
+    // Cambiar tab
+    switchTab(tabId) {
+        // Actualizar navegación
+        document.querySelectorAll('.nav-tab').forEach(tab => {
+            tab.classList.toggle('active', tab.dataset.tab === tabId);
+        });
+        
+        // Actualizar contenido
+        document.querySelectorAll('.tab-content').forEach(content => {
+            content.classList.toggle('active', content.id === `${tabId}-tab`);
+        });
+        
+        state.currentTab = tabId;
+        
+        // Render tab-specific content
+        if (tabId === 'trends') {
+            this.renderTrends();
+        }
+    },
+    
+    // Actualizar estadísticas
+    updateStats() {
+        const stats = dataManager.getStats();
+        
+        document.getElementById('total-papers').textContent = stats.totalPapers;
+        document.getElementById('gray-literature').textContent = stats.grayLiterature;
+        document.getElementById('last-update').textContent = stats.lastUpdate;
+    },
+    
+    // Renderizar papers - Mejorado con mejor manejo de estados
+    renderPapers() {
+        const container = document.getElementById('papers-grid');
+        const filtered = dataManager.getFilteredPapers();
+        
+        // Limpiar contenedor
+        container.innerHTML = '';
+        
+        if (state.loading) {
+            this.showLoadingState(container);
+            return;
+        }
+        
+        if (filtered.length === 0) {
+            this.showEmptyState(container);
+            return;
+        }
+        
+        // Paginación
+        const startIndex = (state.currentPage - 1) * CONFIG.search.itemsPerPage;
+        const endIndex = startIndex + CONFIG.search.itemsPerPage;
+        const paginatedPapers = filtered.slice(startIndex, endIndex);
+        
+        // Crear y añadir tarjetas
+        paginatedPapers.forEach((paper, index) => {
+            const card = this.createPaperCard(paper);
+            // Añadir animación de entrada escalonada
+            card.style.animationDelay = `${index * 0.1}s`;
+            container.appendChild(card);
+        });
+        
+        this.renderPagination(filtered.length);
+    },
+
+    // Show improved loading state
+    showLoadingState(container) {
+        const loadingDiv = document.createElement('div');
+        loadingDiv.className = 'loading';
+        loadingDiv.style.gridColumn = '1 / -1';
+        loadingDiv.innerHTML = `
+            <div class="loading-spinner"></div>
+            <div class="loading-text">Loading papers...</div>
+            <div class="loading-subtext">This may take a few moments</div>
+        `;
+        container.appendChild(loadingDiv);
+    },
+
+    // Show empty state
+    showEmptyState(container) {
+        const emptyDiv = document.createElement('div');
+        emptyDiv.className = 'error-state';
+        emptyDiv.style.gridColumn = '1 / -1';
+        emptyDiv.innerHTML = `
+            <div class="error-icon">📄</div>
+            <div class="error-message">No papers found</div>
+            <p>Try adjusting the filters or updating the data.</p>
+            <button class="retry-btn" onclick="uiManager.refreshData()">
+                <i class="fas fa-sync-alt"></i>
+                Update data
+            </button>
+        `;
+        container.appendChild(emptyDiv);
+    },
+
+    // Show error state
+    showErrorState(container, message) {
+        const errorDiv = document.createElement('div');
+        errorDiv.className = 'error-state';
+        errorDiv.style.gridColumn = '1 / -1';
+        errorDiv.innerHTML = `
+            <div class="error-icon">⚠️</div>
+            <div class="error-message">${message}</div>
+            <button class="retry-btn" onclick="location.reload()">
+                <i class="fas fa-redo"></i>
+                Try again
+            </button>
+        `;
+        container.appendChild(errorDiv);
+    },
+    
+    // Crear tarjeta de paper - Mejorado con modal y seguridad
+    createPaperCard(paper) {
+        const card = document.createElement('article');
+        card.className = 'paper-card';
+        card.style.position = 'relative';
+        card.dataset.id = paper.id;
+        
+        // Sanitise data
+        const safeTitle = utils.escapeHtml(utils.truncateText(paper.title || 'Untitled', 200));
+        const safeAuthors = utils.escapeHtml(utils.truncateText(paper.authors || 'Unknown authors', 150));
+        const safeYear = paper.year || 'N/A';
+        const safeAbstract = utils.escapeHtml(utils.truncateText(paper.abstract || '', 300));
+        
+        // Badge de fuente
+        const sourceClass = paper.isGrayLit ? 'gray-literature' : 'academic';
+        const sourceBadge = document.createElement('div');
+        sourceBadge.className = `paper-source-badge ${sourceClass}`;
+        sourceBadge.textContent = paper.source || 'Manual';
+        
+        // Title
+        const titleElement = document.createElement('h3');
+        titleElement.className = 'paper-title';
+        titleElement.textContent = paper.title || 'Untitled';
+        
+        // Authors
+        const authorsElement = document.createElement('p');
+        authorsElement.className = 'paper-authors';
+        authorsElement.textContent = paper.authors || 'Unknown authors';
+        
+        // Meta información
+        const metaElement = document.createElement('div');
+        metaElement.className = 'paper-meta';
+        metaElement.innerHTML = `
+            <span class="paper-year">
+                <i class="fas fa-calendar"></i>
+                ${safeYear}
+            </span>
+            <span class="paper-type">
+                <i class="fas fa-tag"></i>
+                ${this.getTypeLabel(paper.type)}
+            </span>
+            <span class="paper-citations">
+                <i class="fas fa-quote-right"></i>
+                ${paper.citations || 0} citations
+            </span>
+        `;
+        
+        // Abstract (si existe)
+        let abstractElement = null;
+        if (paper.abstract) {
+            abstractElement = document.createElement('p');
+            abstractElement.className = 'paper-abstract';
+            abstractElement.textContent = utils.truncateText(paper.abstract, 300);
+        }
+        
+        // Categorías
+        const categoriesElement = document.createElement('div');
+        categoriesElement.className = 'paper-keywords';
+        
+        if (paper.categories && paper.categories.length > 0) {
+            paper.categories.slice(0, 3).forEach(category => {
+                const categorySpan = document.createElement('span');
+                categorySpan.className = 'keyword';
+                categorySpan.textContent = category;
+                categoriesElement.appendChild(categorySpan);
+            });
+        }
+        
+        // Footer con score
+        const footerElement = document.createElement('div');
+        footerElement.className = 'paper-footer';
+        footerElement.innerHTML = `
+            <div class="paper-score">
+                <span>Score:</span>
+                <div class="score-bar">
+                    <div class="score-fill" style="width: ${paper.relevanceScore || 0}%"></div>
+                </div>
+                <span>${paper.relevanceScore || 0}</span>
+            </div>
+        `;
+        
+        // Ensamblar tarjeta
+        card.appendChild(sourceBadge);
+        card.appendChild(titleElement);
+        card.appendChild(authorsElement);
+        card.appendChild(metaElement);
+        if (abstractElement) card.appendChild(abstractElement);
+        card.appendChild(categoriesElement);
+        card.appendChild(footerElement);
+        
+        // Evento click para abrir modal
+        card.addEventListener('click', () => this.openModal(paper));
+        card.style.cursor = 'pointer';
+        
+        return card;
+    },
+
+    // Abrir modal con detalles del paper
+    openModal(paper) {
+        const modal = document.getElementById('modal');
+        const modalTitle = document.getElementById('modal-title');
+        const modalAuthors = document.getElementById('modal-authors');
+        const modalDate = document.getElementById('modal-date');
+        const modalDoi = document.getElementById('modal-doi');
+        const modalCategories = document.getElementById('modal-categories');
+        const modalAbstract = document.getElementById('modal-abstract');
+        const modalLink = document.getElementById('modal-link');
+        const modalCite = document.getElementById('modal-cite');
+        
+        // Sanitise and display data
+        modalTitle.textContent = utils.truncateText(paper.title || 'Untitled', 300);
+        modalAuthors.textContent = `Authors: ${utils.truncateText(paper.authors || 'N/A', 200)}`;
+        modalDate.textContent = `Date: ${paper.year || 'N/A'}`;
+        
+        // DOI
+        const safeDoi = utils.sanitizeDoi(paper.doi);
+        if (safeDoi) {
+            modalDoi.innerHTML = '';
+            const doiText = document.createElement('span');
+            doiText.textContent = 'DOI: ';
+            const doiLink = document.createElement('a');
+            doiLink.href = `https://doi.org/${safeDoi}`;
+            doiLink.target = '_blank';
+            doiLink.rel = 'noopener noreferrer';
+            doiLink.textContent = safeDoi;
+            modalDoi.appendChild(doiText);
+            modalDoi.appendChild(doiLink);
+            modalDoi.style.display = 'block';
+        } else {
+            modalDoi.style.display = 'none';
+        }
+        
+        // Categorías
+        modalCategories.innerHTML = '';
+        if (paper.categories && paper.categories.length > 0) {
+            paper.categories.forEach(category => {
+                const categoryTag = document.createElement('span');
+                categoryTag.className = 'modal-category-tag';
+                categoryTag.textContent = category;
+                modalCategories.appendChild(categoryTag);
+            });
+        }
+        
+        // Abstract
+        modalAbstract.textContent = utils.truncateText(paper.abstract || 'No abstract available.', 2000);
+        
+        // Link principal
+        const safeUrl = utils.sanitizeUrl(paper.url);
+        modalLink.href = safeUrl;
+        if (safeUrl === '#') {
+            modalLink.style.display = 'none';
+        } else {
+            modalLink.style.display = 'inline-flex';
+            modalLink.rel = 'noopener noreferrer';
+        }
+        
+        // Botón citar
+        modalCite.onclick = () => this.copyCitation(paper);
+        
+        modal.style.display = 'block';
+        document.body.style.overflow = 'hidden'; // Prevenir scroll del body
+    },
+
+    // Cerrar modal
+    closeModal() {
+        const modal = document.getElementById('modal');
+        modal.style.display = 'none';
+        document.body.style.overflow = 'auto';
+    },
+
+    // Copiar cita al portapapeles
+    copyCitation(paper) {
+        const citation = this.generateCitation(paper);
+        
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText(citation).then(() => {
+                utils.showNotification('Citation copied to clipboard', 'success');
+            }).catch(() => {
+                this.fallbackCopyText(citation);
+            });
+        } else {
+            this.fallbackCopyText(citation);
+        }
+    },
+
+    // Fallback para copiar texto
+    fallbackCopyText(text) {
+        const textArea = document.createElement('textarea');
+        textArea.value = text;
+        document.body.appendChild(textArea);
+        textArea.select();
+        try {
+            document.execCommand('copy');
+            utils.showNotification('Citation copied to clipboard', 'success');
+        } catch (err) {
+            utils.showNotification('Error copying citation', 'error');
+        }
+        document.body.removeChild(textArea);
+    },
+
+    // Generate citation in APA format
+    generateCitation(paper) {
+        const authors = paper.authors || 'Unknown author';
+        const year = paper.year || 'no date';
+        const title = paper.title || 'Untitled';
+        const doi = paper.doi ? ` https://doi.org/${paper.doi}` : '';
+        const url = !paper.doi && paper.url ? ` ${paper.url}` : '';
+        
+        return `${authors} (${year}). ${title}.${doi}${url}`;
+    },
+    
+    // Extraer keywords del contenido
+    extractKeywords(paper) {
+        const text = `${paper.title || ''} ${paper.abstract || ''}`.toLowerCase();
+        const relevantKeywords = CONFIG.keywords.filter(keyword => 
+            text.includes(keyword.toLowerCase())
+        );
+        
+        if (relevantKeywords.length === 0) {
+            return ['IA', 'Trabajo', 'Tecnología'];
+        }
+        
+        return relevantKeywords.slice(0, 5);
+    },
+    
+    // Get type label
+    getTypeLabel(type) {
+        const labels = {
+            'journal': 'Journal',
+            'conference': 'Conference',
+            'report': 'Report',
+            'working-paper': 'Working Paper',
+            'book': 'Book'
+        };
+        return labels[type] || 'Unknown';
+    },
+    
+    // Renderizar paginación
+    renderPagination(totalItems) {
+        const container = document.getElementById('pagination');
+        const totalPages = Math.ceil(totalItems / CONFIG.search.itemsPerPage);
+        
+        if (totalPages <= 1) {
+            container.innerHTML = '';
+            return;
+        }
+        
+        let paginationHTML = '';
+        
+        // Botón anterior
+        paginationHTML += `
+            <button class="page-btn" ${state.currentPage === 1 ? 'disabled' : ''} 
+                    onclick="uiManager.changePage(${state.currentPage - 1})">
+                <i class="fas fa-chevron-left"></i>
+            </button>
+        `;
+        
+        // Páginas
+        for (let i = 1; i <= totalPages; i++) {
+            if (i === 1 || i === totalPages || (i >= state.currentPage - 2 && i <= state.currentPage + 2)) {
+                paginationHTML += `
+                    <button class="page-btn ${i === state.currentPage ? 'active' : ''}" 
+                            onclick="uiManager.changePage(${i})">
+                        ${i}
+                    </button>
+                `;
+            } else if (i === state.currentPage - 3 || i === state.currentPage + 3) {
+                paginationHTML += '<span class="page-ellipsis">...</span>';
+            }
+        }
+        
+        // Botón siguiente
+        paginationHTML += `
+            <button class="page-btn" ${state.currentPage === totalPages ? 'disabled' : ''} 
+                    onclick="uiManager.changePage(${state.currentPage + 1})">
+                <i class="fas fa-chevron-right"></i>
+            </button>
+        `;
+        
+        container.innerHTML = paginationHTML;
+    },
+    
+    // Cambiar página
+    changePage(page) {
+        state.currentPage = page;
+        this.renderPapers();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    },
+    
+    // Refresh de datos - Mejorado con mejor manejo de errores y timeouts
+    async refreshData() {
+        const refreshBtn = document.getElementById('refresh-btn');
+        const container = document.getElementById('papers-grid');
+        
+        refreshBtn.classList.add('loading');
+        state.loading = true;
+        this.renderPapers(); // Mostrar estado de carga
+        
+        try {
+            utils.showNotification('Updating data from APIs...', 'info');
+            
+            // Buscar de forma más eficiente y segura
+            const searchPromises = [];
+            
+            // Usar menos keywords pero más específicas para evitar timeouts
+            const priorityKeywords = [
+                'artificial intelligence employment 2025',
+                'generative AI jobs future work',
+                'automation workforce transformation 2024'
+            ];
+            
+            for (const keyword of priorityKeywords) {
+                // Añadir timeout individual por búsqueda
+                const searchPromise = Promise.race([
+                    apiService.searchAllAPIs(keyword),
+                    new Promise((_, reject) => 
+                        setTimeout(() => reject(new Error('Search timeout')), 20000)
+                    )
+                ]);
+                searchPromises.push(searchPromise);
+            }
+            
+            // Ejecutar búsquedas en paralelo con manejo de errores
+            const results = await Promise.allSettled(searchPromises);
+            
+            const allResults = [];
+            let successfulSearches = 0;
+            
+            results.forEach((result, index) => {
+                if (result.status === 'fulfilled' && Array.isArray(result.value)) {
+                    allResults.push(...result.value);
+                    successfulSearches++;
+                } else {
+                    console.warn(`Search ${index + 1} failed:`, result.reason);
+                }
+            });
+            
+            // Filtrar por fecha 2021+ antes de agregar (últimos 4 años)
+            const recentPapers = allResults.filter(paper => {
+                if (!paper.year) return false;
+                return paper.year >= 2021;
+            });
+            
+            const addedCount = dataManager.addPapers(recentPapers);
+            
+            this.updateStats();
+            this.renderPapers();
+            
+            if (successfulSearches === 0) {
+                utils.showNotification('Could not load data from APIs. Please check your connection.', 'error');
+            } else if (addedCount === 0) {
+                utils.showNotification('No new papers found.', 'info');
+            } else {
+                utils.showNotification(
+                    `Update completed. ${addedCount} new papers added from ${successfulSearches} sources.`, 
+                    'success'
+                );
+            }
+            
+        } catch (error) {
+            console.error('General error updating data:', error);
+            utils.showNotification('Unexpected error updating data.', 'error');
+            this.showErrorState(container, 'Error loading data from APIs');
+        } finally {
+            refreshBtn.classList.remove('loading');
+            state.loading = false;
+            this.renderPapers();
+        }
+    },
+    
+    // Manejar agregar paper manualmente
+    handleAddPaper() {
+        const formData = new FormData(document.getElementById('paper-form'));
+        
+        const paper = {
+            title: formData.get('paper-title'),
+            authors: formData.get('paper-authors'),
+            year: parseInt(formData.get('paper-year')),
+            url: formData.get('paper-url'),
+            abstract: formData.get('paper-abstract'),
+            type: formData.get('paper-type'),
+            keywords: formData.get('paper-keywords')?.split(',').map(k => k.trim()).filter(Boolean),
+            importance: formData.get('paper-importance'),
+            source: 'Manual',
+            citations: 0
+        };
+        
+        if (dataManager.addPaper(paper)) {
+            utils.showNotification('Paper added successfully', 'success');
+            document.getElementById('paper-form').reset();
+            this.updateStats();
+            this.switchTab('papers');
+            this.renderPapers();
+        } else {
+            utils.showNotification('This paper already exists in the database', 'error');
+        }
+    },
+    
+
+    
+    // Renderizar tendencias
+    renderTrends() {
+        this.renderTopics();
+        this.renderAuthors();
+        this.renderSources();
+        this.renderTypes();
+    },
+    
+    // Renderizar nube de temas
+    renderTopics() {
+        const container = document.getElementById('topics-cloud');
+        const topicCounts = {};
+        
+        state.papers.forEach(paper => {
+            const keywords = this.extractKeywords(paper);
+            keywords.forEach(keyword => {
+                topicCounts[keyword] = (topicCounts[keyword] || 0) + 1;
+            });
+        });
+        
+        const sortedTopics = Object.entries(topicCounts)
+            .sort(([,a], [,b]) => b - a)
+            .slice(0, 20);
+        
+        container.innerHTML = sortedTopics.map(([topic, count]) => 
+            `<span class="topic-tag" style="font-size: ${Math.min(12 + count * 2, 24)}px">
+                ${topic} (${count})
+             </span>`
+        ).join('');
+    },
+    
+    // Renderizar autores destacados
+    renderAuthors() {
+        const container = document.getElementById('authors-list');
+        const authorCounts = {};
+        
+        state.papers.forEach(paper => {
+            const authors = paper.authors?.split(',') || [];
+            authors.forEach(author => {
+                const cleanAuthor = author.trim();
+                if (cleanAuthor && cleanAuthor !== 'Unknown') {
+                    authorCounts[cleanAuthor] = (authorCounts[cleanAuthor] || 0) + 1;
+                }
+            });
+        });
+        
+        const sortedAuthors = Object.entries(authorCounts)
+            .sort(([,a], [,b]) => b - a)
+            .slice(0, 10);
+        
+        container.innerHTML = sortedAuthors.map(([author, count]) => 
+            `<div class="author-item">
+                <span class="author-name">${author}</span>
+                <span class="author-count">${count} papers</span>
+             </div>`
+        ).join('');
+    },
+    
+    // Renderizar fuentes
+    renderSources() {
+        const container = document.getElementById('sources-breakdown');
+        const sourceCounts = {};
+        
+        state.papers.forEach(paper => {
+            const source = paper.source || 'Unknown';
+            sourceCounts[source] = (sourceCounts[source] || 0) + 1;
+        });
+        
+        const total = state.papers.length;
+        
+        container.innerHTML = Object.entries(sourceCounts)
+            .sort(([,a], [,b]) => b - a)
+            .map(([source, count]) => {
+                const percentage = ((count / total) * 100).toFixed(1);
+                return `
+                    <div class="source-item">
+                        <span class="source-name">${source}</span>
+                        <div class="source-bar">
+                            <div class="source-fill" style="width: ${percentage}%"></div>
+                        </div>
+                        <span class="source-count">${count} (${percentage}%)</span>
+                    </div>
+                `;
+            }).join('');
+    },
+
+    // Renderizar tipos de publicación
+    renderTypes() {
+        const container = document.getElementById('types-breakdown');
+        const typeCounts = {};
+        
+        state.papers.forEach(paper => {
+            const type = this.getTypeLabel(paper.type || 'Unknown');
+            typeCounts[type] = (typeCounts[type] || 0) + 1;
+        });
+        
+        const total = state.papers.length;
+        
+        if (total === 0) {
+            container.innerHTML = '<p>No data available</p>';
+            return;
+        }
+        
+        container.innerHTML = Object.entries(typeCounts)
+            .sort(([,a], [,b]) => b - a)
+            .map(([type, count]) => {
+                const percentage = ((count / total) * 100).toFixed(1);
+                return `
+                    <div class="source-item">
+                        <span class="source-name">${type}</span>
+                        <div class="source-bar">
+                            <div class="source-fill" style="width: ${percentage}%"></div>
+                        </div>
+                        <span class="source-count">${count} (${percentage}%)</span>
+                    </div>
+                `;
+            }).join('');
+    }
+};
+
+// ===== INICIALIZACIÓN =====
+document.addEventListener('DOMContentLoaded', () => {
+    uiManager.init();
+    
+    // Configurar auto-refresh cada 24 horas
+    const lastUpdate = localStorage.getItem('livingReview_lastUpdate');
+    if (!lastUpdate || (Date.now() - new Date(lastUpdate).getTime()) > 24 * 60 * 60 * 1000) {
+        setTimeout(() => uiManager.refreshData(), 2000);
+    }
+});
+
+// ===== EXPORTAR PARA USO GLOBAL =====
+window.uiManager = uiManager;
+window.dataManager = dataManager;
+window.apiService = apiService; 

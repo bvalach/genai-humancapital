@@ -1,0 +1,25 @@
+title: "The Impact of Generative AI on the Future of Work"
+description: "A Living Literature Review - Interactive repository of academic papers and gray literature on AI's impact on employment and labor markets"
+
+# GitHub Pages configuration
+url: "https://yourusername.github.io"
+baseurl: "/genai-humancapital"
+
+# Build settings
+markdown: kramdown
+highlighter: rouge
+
+# Plugins
+plugins:
+  - jekyll-feed
+  - jekyll-sitemap
+
+# Exclude files from processing
+exclude:
+  - README.md
+  - LICENSE
+  - .gitignore
+
+# Include custom 404 page
+include:
+  - _config.yml 
