@@ -15,16 +15,54 @@ const CONFIG = {
     
     // Keywords para búsqueda automática
     keywords: [
-        'artificial intelligence jobs',
-        'generative AI employment',
-        'AI automation workforce',
-        'machine learning labor market',
-        'agentic AI future work',
-        'ChatGPT employment impact',
-        'large language models jobs',
-        'AI displacement workers'
+        // --- Conceptos Centrales y Tecnologías Específicas ---
+        '"generative AI" AND "labor market"',
+        '"generative AI" AND "employment"',
+        '"large language models" AND "jobs"',
+        '"agentic AI" AND "workforce"',
+        '("ChatGPT" OR "LLM") AND "employment impact"',
+
+        // --- Perspectiva Económica Neoclásica y de Productividad ---
+        '"AI" AND "labor productivity"',
+        '"automation" AND "wage inequality"',
+        '"AI" AND "skill premium"',
+        '"AI" AND "capital-labor substitution"',
+        '"technological unemployment"',
+        '"task automation" AND "labor demand"',
+        '"productivity paradox" AND "AI"',
+        
+        // --- Perspectiva de Capital Humano y Habilidades (Skills) ---
+        '"artificial intelligence" AND "human capital"',
+        '"AI" AND "reskilling"',
+        '"AI" AND "upskilling"',
+        '"skill-biased technological change"', // Un término clásico y muy relevante
+        '"future of skills" AND "AI"',
+        '"workforce transition" AND "automation"',
+        
+        // --- Creación, Destrucción y Recomposición del Trabajo ---
+        '"job displacement" AND "artificial intelligence"',
+        '"job creation" AND "automation"',
+        '"task-based approach" AND "AI"', // Enfocado en la metodología de análisis de tareas
+        '"job quality" AND "AI"'
     ],
-    
+    // --- NUEVO: Palabras clave a excluir para aumentar la relevancia ---
+    negativeKeywords: [
+        'ethics', 'privacy', 'algorithmic bias', 'fairness', 'accountability',
+        'transparency', 'computer vision', 'robotics surgery', 'dataset creation',
+        'model architecture', 'philosophy', 'governance model'
+    ],
+
+    // --- NUEVO: Autores e Instituciones clave para búsquedas prioritarias ---
+    priorityAuthorsAndInstitutions: [
+        'Daron Acemoglu',
+        'Erik Brynjolfsson',
+        'David Autor',
+        'Anna Salomons',
+        'Jeffrey Sachs',
+        'NBER', // National Bureau of Economic Research
+        'MIT Future of Work',
+        'Stanford HAI'
+    ],
     // Configuración de búsqueda
     search: {
         maxResults: 100,
@@ -209,13 +247,12 @@ const utils = {
         const categories = [];
         
         const categoryKeywords = {
-            'AI & Employment': ['artificial intelligence jobs', 'ai employment', 'automation employment', 'job displacement'],
-            'Generative AI': ['generative AI', 'large language model', 'chatgpt', 'llm', 'generative adversarial'],
-            'Future of Work': ['future of work', 'workforce transformation', 'human-ai collaboration', 'job automation'],
-            'Labor Economics': ['labor market', 'employment economics', 'wage effects', 'productivity'],
-            'Reskilling': ['reskilling', 'upskilling', 'skill development', 'workforce training'],
-            'Policy & Regulation': ['ai policy', 'regulation', 'governance', 'ethics'],
-            'Industry Impact': ['manufacturing automation', 'service jobs', 'knowledge work', 'professional services']
+            'Generative AI': ['generative ai', 'large language model', 'chatgpt', 'llm', 'agentic ai'],
+            'Labor Economics': ['labor market', 'employment', 'wage', 'productivity', 'skill premium', 'job polarization', 'labor demand', 'unemployment'],
+            'Human Capital & Skills': ['reskilling', 'upskilling', 'skill development', 'human capital', 'workforce training', 'skill-biased'],
+            'Displacement & Creation': ['job displacement', 'job creation', 'task automation', 'technological unemployment'],
+            'Policy & Governance': ['ai policy', 'regulation', 'governance', 'ethics', 'ai safety'],
+            'Future of Work': ['future of work', 'workforce transformation', 'human-ai collaboration']
         };
         
         for (const [category, keywords] of Object.entries(categoryKeywords)) {
@@ -224,7 +261,7 @@ const utils = {
             }
         }
         
-        return categories.length > 0 ? categories : ['General'];
+        return categories.length > 0 ? categories : ['General AI'];
     },
 
     // Determinar si es literatura gris
@@ -622,12 +659,22 @@ const apiService = {
             ...(semanticResults.status === 'fulfilled' ? semanticResults.value : []),
             ...(openalexResults.status === 'fulfilled' ? openalexResults.value : [])
         ];
+
+        // --- AJUSTE NECESARIO AQUÍ ---
+        // Aplicar el filtro de palabras clave negativas antes de procesar los resultados.
+        const filteredByNegative = allResults.filter(paper => {
+            const textToSearch = `${paper.title || ''} ${paper.abstract || ''}`.toLowerCase();
+            // Devuelve 'true' (conserva el paper) si NO encuentra NINGUNA palabra clave negativa.
+            return !CONFIG.negativeKeywords.some(negKeyword => textToSearch.includes(negKeyword.toLowerCase()));
+        });
+        // --- FIN DEL AJUSTE ---
         
         // Eliminar duplicados basados en título
         const uniqueResults = [];
         const seenTitles = new Set();
         
-        for (const paper of allResults) {
+        // ¡Importante! Usar 'filteredByNegative' en lugar de 'allResults' en el bucle
+        for (const paper of filteredByNegative) { 
             const cleanTitle = utils.cleanText(paper.title || '');
             if (cleanTitle && !seenTitles.has(cleanTitle)) {
                 seenTitles.add(cleanTitle);
@@ -1316,6 +1363,7 @@ const uiManager = {
     },
     
     // Refresh de datos - Mejorado con mejor manejo de errores y timeouts
+    
     async refreshData() {
         const refreshBtn = document.getElementById('refresh-btn');
         const container = document.getElementById('papers-grid');
@@ -1327,18 +1375,16 @@ const uiManager = {
         try {
             utils.showNotification('Updating data from APIs...', 'info');
             
-            // Buscar de forma más eficiente y segura
             const searchPromises = [];
             
-            // Usar menos keywords pero más específicas para evitar timeouts
+            // Usar la lista de keywords recomendada o tu lista principal
             const priorityKeywords = [
-                'artificial intelligence employment 2025',
-                'generative AI jobs future work',
-                'automation workforce transformation 2024'
+                    '"generative AI" AND "labor market"',
+                    '"AI" AND "labor productivity"',
+                    '"automation" AND "human capital"'
             ];
             
             for (const keyword of priorityKeywords) {
-                // Añadir timeout individual por búsqueda
                 const searchPromise = Promise.race([
                     apiService.searchAllAPIs(keyword),
                     new Promise((_, reject) => 
@@ -1347,7 +1393,26 @@ const uiManager = {
                 ]);
                 searchPromises.push(searchPromise);
             }
-            
+    
+            // --- NUEVO: Añadir búsquedas por autores e instituciones clave ---
+            console.log('Adding priority author and institution searches...');
+            // Usamos una query base para asegurar que el trabajo del autor sea relevante al tema
+            const baseQuery = '"artificial intelligence" OR "automation"'; 
+            for (const entity of CONFIG.priorityAuthorsAndInstitutions) {
+                // Creamos una query que combina el tema con el autor/institución
+                const specificQuery = `(${baseQuery}) AND "${entity}"`;
+                console.log(`Creating promise for query: ${specificQuery}`);
+                
+                const searchPromise = Promise.race([
+                    apiService.searchAllAPIs(specificQuery),
+                    new Promise((_, reject) => 
+                        setTimeout(() => reject(new Error(`Search timeout for ${entity}`)), 20000)
+                    )
+                ]);
+                searchPromises.push(searchPromise);
+            }
+            // --- FIN DE LA NUEVA SECCIÓN ---
+
             // Ejecutar búsquedas en paralelo con manejo de errores
             const results = await Promise.allSettled(searchPromises);
             
