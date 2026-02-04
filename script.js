@@ -45,6 +45,18 @@ const CONFIG = {
         '"task-based approach" AND "AI"', // Enfocado en la metodología de análisis de tareas
         '"job quality" AND "AI"'
     ],
+    // --- NUEVO: Términos núcleo para filtro estricto de relevancia ---
+    coreTerms: [
+        'generative ai', 'genai', 'large language model', 'llm', 'agentic ai',
+        'labor market', 'employment', 'jobs', 'wages', 'wage', 'productivity',
+        'task automation', 'automation', 'workforce', 'human capital',
+        'reskilling', 'upskilling', 'skill-biased', 'future of work',
+        'job displacement', 'job creation'
+    ],
+    // --- NUEVO: Indicadores de "ahead of print" / "early view" ---
+    aheadOfPrintTerms: [
+        'ahead of print', 'early view', 'online first', 'in press', 'forthcoming'
+    ],
     // --- NUEVO: Palabras clave a excluir para aumentar la relevancia ---
     negativeKeywords: [
         'ethics', 'privacy', 'algorithmic bias', 'fairness', 'accountability',
@@ -67,7 +79,7 @@ const CONFIG = {
     search: {
         maxResults: 100,
         minYear: 2021,  // Últimos 4 años para capturar la evolución de IA generativa
-        maxYear: 2025,
+        maxYear: 2026,
         itemsPerPage: 12
     },
     
@@ -113,7 +125,9 @@ const state = {
     lastApiCall: 0,
     minApiInterval: 2000, // 2 segundos entre llamadas
     // SELECCIÓN: Control de papers seleccionados
-    selectedPapers: new Set()
+    selectedPapers: new Set(),
+    // Diagnóstico de ingesta
+    diagnostics: null
 };
 
 // ===== UTILIDADES =====
@@ -185,6 +199,36 @@ const utils = {
         if (!text) return '';
         return text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
     },
+    
+    hasMeaningfulAbstract(text) {
+        if (!text) return false;
+        const clean = text.trim().toLowerCase();
+        if (clean.length < 40) return false;
+        if (clean.includes('no abstract available')) return false;
+        return true;
+    },
+    
+    isAheadOfPrint(text) {
+        if (!text) return false;
+        const clean = text.toLowerCase();
+        return CONFIG.aheadOfPrintTerms.some(term => clean.includes(term));
+    },
+    
+    extractCrossRefYear(item) {
+        if (!item || typeof item !== 'object') return 0;
+        const sources = [
+            item['published-print'],
+            item['published-online'],
+            item.published,
+            item.issued,
+            item.created
+        ];
+        for (const src of sources) {
+            const year = src?.['date-parts']?.[0]?.[0];
+            if (year) return year;
+        }
+        return 0;
+    },
 
     // NUEVA: Validación segura de entrada
     validateInput(value, type, maxLength = 1000) {
@@ -229,6 +273,7 @@ const utils = {
             doi: this.sanitizeDoi(paper.doi),
             type: this.validateInput(paper.type, 'text', 50),
             source: this.validateInput(paper.source, 'text', 100),
+            venue: this.validateInput(paper.venue, 'text', 200),
             citations: this.validateInput(paper.citations, 'number'),
             keywords: Array.isArray(paper.keywords) ? 
                 paper.keywords.map(k => this.validateInput(k, 'text', 100)).filter(Boolean) : 
@@ -311,8 +356,8 @@ const utils = {
         score += Math.min(citations / 10, 30);
         
         // Score por año (más reciente = más puntos, max 25 puntos)
-        const year = paper.year || 2021;
-        const yearScore = ((year - 2021) / (2025 - 2021)) * 25;
+        const year = paper.year || CONFIG.search.minYear;
+        const yearScore = ((year - CONFIG.search.minYear) / (CONFIG.search.maxYear - CONFIG.search.minYear)) * 25;
         score += yearScore;
         
         // Score por keywords relevantes (max 25 puntos)
@@ -528,7 +573,7 @@ const apiService = {
     // Semantic Scholar API
     async searchSemanticScholar(query, limit = 50) {
         try {
-            const url = `${CONFIG.apis.semanticScholar}/paper/search?query=${encodeURIComponent(query)}&limit=${limit}&fields=title,abstract,year,authors,citationCount,url,publicationTypes`;
+            const url = `${CONFIG.apis.semanticScholar}/paper/search?query=${encodeURIComponent(query)}&limit=${limit}&fields=title,abstract,year,authors,citationCount,url,publicationTypes,venue`;
             const response = await fetch(url);
             const data = await response.json();
             
@@ -540,6 +585,7 @@ const apiService = {
                 abstract: paper.abstract,
                 citations: paper.citationCount || 0,
                 url: paper.url,
+                venue: paper.venue,
                 type: this.mapPublicationType(paper.publicationTypes),
                 source: 'Semantic Scholar',
                 addedDate: new Date().toISOString()
@@ -556,7 +602,7 @@ const apiService = {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
             
-            const url = `${CONFIG.apis.crossref}?query=${encodeURIComponent(query)}&rows=${limit}&filter=from-pub-date:2021,until-pub-date:2025&sort=published&order=desc`;
+            const url = `${CONFIG.apis.crossref}?query=${encodeURIComponent(query)}&rows=${limit}&filter=from-pub-date:2021-01-01,until-pub-date:2026-12-31&sort=published&order=desc`;
             
             const response = await fetch(url, {
                 method: 'GET',
@@ -588,11 +634,12 @@ const apiService = {
                         authors: item.author?.map(a => 
                             utils.truncateText(`${a.given || ''} ${a.family || ''}`.trim(), 100)
                         ).filter(name => name).join(', ') || 'Unknown',
-                        year: item.published?.['date-parts']?.[0]?.[0],
+                        year: utils.extractCrossRefYear(item),
                         abstract: utils.truncateText(item.abstract, 2000),
                         citations: Math.max(0, item['is-referenced-by-count'] || 0),
                         url: utils.sanitizeUrl(item.URL),
                         doi: utils.sanitizeDoi(item.DOI),
+                        venue: item['container-title']?.[0],
                         type: this.mapCrossRefType(item.type),
                         source: 'CrossRef',
                         addedDate: new Date().toISOString()
@@ -625,6 +672,7 @@ const apiService = {
                 abstract: work.abstract_inverted_index ? this.reconstructAbstract(work.abstract_inverted_index) : null,
                 citations: work.cited_by_count || 0,
                 url: work.primary_location?.landing_page_url,
+                venue: work.primary_location?.source?.display_name,
                 type: this.mapOpenAlexType(work.type),
                 source: 'OpenAlex',
                 addedDate: new Date().toISOString()
@@ -660,6 +708,13 @@ const apiService = {
             ...(openalexResults.status === 'fulfilled' ? openalexResults.value : [])
         ];
 
+        // Diagnóstico previo a filtros
+        const preFilterCounts = {};
+        allResults.forEach(p => {
+            const source = p.source || 'Unknown';
+            preFilterCounts[source] = (preFilterCounts[source] || 0) + 1;
+        });
+
         // --- AJUSTE NECESARIO AQUÍ ---
         // Aplicar el filtro de palabras clave negativas antes de procesar los resultados.
         const filteredByNegative = allResults.filter(paper => {
@@ -667,14 +722,31 @@ const apiService = {
             // Devuelve 'true' (conserva el paper) si NO encuentra NINGUNA palabra clave negativa.
             return !CONFIG.negativeKeywords.some(negKeyword => textToSearch.includes(negKeyword.toLowerCase()));
         });
+
+        // Filtro estricto: requiere abstract con contenido y al menos un término núcleo
+        const filteredStrict = filteredByNegative.filter(paper => {
+            const title = utils.cleanText(paper.title || '');
+            const abstract = utils.cleanText(paper.abstract || '');
+            const hasAbstract = utils.hasMeaningfulAbstract(paper.abstract || '');
+            const isAheadOfPrint = utils.isAheadOfPrint(`${paper.title || ''} ${paper.abstract || ''}`);
+            const text = `${title} ${abstract}`;
+            const hasCoreTerm = CONFIG.coreTerms.some(term => text.includes(utils.cleanText(term)));
+            if ((hasAbstract || isAheadOfPrint) && hasCoreTerm) return true;
+            if (paper.source === 'CrossRef') {
+                const hasStrongTitle = title.length > 20 && hasCoreTerm;
+                const hasSignal = (paper.citations || 0) > 0 || !!paper.doi;
+                return hasStrongTitle && hasSignal;
+            }
+            return false;
+        });
         // --- FIN DEL AJUSTE ---
         
         // Eliminar duplicados basados en título
         const uniqueResults = [];
         const seenTitles = new Set();
         
-        // ¡Importante! Usar 'filteredByNegative' en lugar de 'allResults' en el bucle
-        for (const paper of filteredByNegative) { 
+        // ¡Importante! Usar 'filteredStrict' en lugar de 'allResults' en el bucle
+        for (const paper of filteredStrict) { 
             const cleanTitle = utils.cleanText(paper.title || '');
             if (cleanTitle && !seenTitles.has(cleanTitle)) {
                 seenTitles.add(cleanTitle);
@@ -682,8 +754,24 @@ const apiService = {
                 uniqueResults.push(paper);
             }
         }
+
+        const sortedResults = uniqueResults.sort((a, b) => b.relevanceScore - a.relevanceScore);
+
+        const postFilterCounts = {};
+        sortedResults.forEach(p => {
+            const source = p.source || 'Unknown';
+            postFilterCounts[source] = (postFilterCounts[source] || 0) + 1;
+        });
         
-        return uniqueResults.sort((a, b) => b.relevanceScore - a.relevanceScore);
+        return {
+            results: sortedResults,
+            diagnostics: {
+                preFilterCounts,
+                postFilterCounts,
+                preFilterTotal: allResults.length,
+                postFilterTotal: sortedResults.length
+            }
+        };
     },
     
     // Mapear tipos de publicación
@@ -1418,20 +1506,42 @@ const uiManager = {
             
             const allResults = [];
             let successfulSearches = 0;
+            const diagnostics = {
+                preFilterCounts: {},
+                postFilterCounts: {},
+                preFilterTotal: 0,
+                postFilterTotal: 0
+            };
             
             results.forEach((result, index) => {
-                if (result.status === 'fulfilled' && Array.isArray(result.value)) {
-                    allResults.push(...result.value);
+                if (result.status === 'fulfilled' && result.value && Array.isArray(result.value.results)) {
+                    allResults.push(...result.value.results);
                     successfulSearches++;
+                    
+                    const diag = result.value.diagnostics;
+                    if (diag) {
+                        diagnostics.preFilterTotal += diag.preFilterTotal || 0;
+                        diagnostics.postFilterTotal += diag.postFilterTotal || 0;
+                        for (const [source, count] of Object.entries(diag.preFilterCounts || {})) {
+                            diagnostics.preFilterCounts[source] = (diagnostics.preFilterCounts[source] || 0) + count;
+                        }
+                        for (const [source, count] of Object.entries(diag.postFilterCounts || {})) {
+                            diagnostics.postFilterCounts[source] = (diagnostics.postFilterCounts[source] || 0) + count;
+                        }
+                    }
                 } else {
                     console.warn(`Search ${index + 1} failed:`, result.reason);
                 }
             });
             
+            state.diagnostics = diagnostics;
+            
             // Filtrar por fecha 2021+ antes de agregar (últimos 4 años)
             const recentPapers = allResults.filter(paper => {
-                if (!paper.year) return false;
-                return paper.year >= 2021;
+                if (paper.year) {
+                    return paper.year >= CONFIG.search.minYear && paper.year <= CONFIG.search.maxYear;
+                }
+                return utils.isAheadOfPrint(`${paper.title || ''} ${paper.abstract || ''}`);
             });
             
             const addedCount = dataManager.addPapers(recentPapers);
@@ -1467,10 +1577,238 @@ const uiManager = {
     
     // Renderizar tendencias
     renderTrends() {
+        this.renderKeyMetrics();
+        this.renderYearlyOutput();
+        this.renderDiagnostics();
         this.renderTopics();
+        this.renderTopKeywords();
+        this.renderTopVenues();
+        this.renderQualityCoverage();
         this.renderAuthors();
         this.renderSources();
         this.renderTypes();
+    },
+
+    // Diagnóstico básico de ingesta
+    renderDiagnostics() {
+        const container = document.getElementById('diagnostics-panel');
+        const total = state.papers.length;
+        if (total === 0) {
+            container.innerHTML = '<p>No data available</p>';
+            return;
+        }
+        const diag = state.diagnostics;
+        const sourceCounts = {};
+        state.papers.forEach(p => {
+            const source = p.source || 'Unknown';
+            sourceCounts[source] = (sourceCounts[source] || 0) + 1;
+        });
+        
+        const missingAbstract = state.papers.filter(p => !utils.hasMeaningfulAbstract(p.abstract || '')).length;
+        const missingYear = state.papers.filter(p => !p.year).length;
+        const missingDoi = state.papers.filter(p => !p.doi).length;
+        const missingUrl = state.papers.filter(p => !p.url).length;
+        
+        const sortedSources = Object.entries(sourceCounts).sort(([,a], [,b]) => b - a);
+        const diagSources = diag ? Object.keys(diag.preFilterCounts || {}).sort() : [];
+        
+        container.innerHTML = `
+            <div class="diag-block">
+                <div class="diag-title">Source mix (in library)</div>
+                ${sortedSources.map(([source, count]) => {
+                    const pct = ((count / total) * 100).toFixed(1);
+                    return `<div class="diag-row">
+                        <span class="diag-label">${utils.escapeHtml(source)}</span>
+                        <span class="diag-value">${count} (${pct}%)</span>
+                    </div>`;
+                }).join('')}
+            </div>
+            <div class="diag-block">
+                <div class="diag-title">Ingestion (pre vs post filter)</div>
+                ${diag ? diagSources.map(source => {
+                    const pre = diag.preFilterCounts[source] || 0;
+                    const post = diag.postFilterCounts[source] || 0;
+                    return `<div class="diag-row">
+                        <span class="diag-label">${utils.escapeHtml(source)}</span>
+                        <span class="diag-value">${pre} → ${post}</span>
+                    </div>`;
+                }).join('') : '<div class="diag-row"><span class="diag-label">No recent run</span><span class="diag-value">—</span></div>'}
+            </div>
+            <div class="diag-block">
+                <div class="diag-title">Missing fields</div>
+                <div class="diag-row"><span class="diag-label">Abstract</span><span class="diag-value">${missingAbstract}</span></div>
+                <div class="diag-row"><span class="diag-label">Year</span><span class="diag-value">${missingYear}</span></div>
+                <div class="diag-row"><span class="diag-label">DOI</span><span class="diag-value">${missingDoi}</span></div>
+                <div class="diag-row"><span class="diag-label">URL</span><span class="diag-value">${missingUrl}</span></div>
+            </div>
+        `;
+    },
+
+    // Top venues
+    renderTopVenues() {
+        const container = document.getElementById('venues-list');
+        const venueCounts = {};
+        
+        state.papers.forEach(paper => {
+            const venue = (paper.venue || '').trim();
+            if (venue) {
+                venueCounts[venue] = (venueCounts[venue] || 0) + 1;
+            }
+        });
+        
+        const sortedVenues = Object.entries(venueCounts)
+            .sort(([,a], [,b]) => b - a)
+            .slice(0, 10);
+        
+        if (sortedVenues.length === 0) {
+            container.innerHTML = '<p>No venue data available</p>';
+            return;
+        }
+        
+        container.innerHTML = sortedVenues.map(([venue, count]) => 
+            `<div class="author-item">
+                <span class="author-name">${utils.escapeHtml(venue)}</span>
+                <span class="author-count">${count}</span>
+            </div>`
+        ).join('');
+    },
+
+    // Top keywords cloud
+    renderTopKeywords() {
+        const container = document.getElementById('keywords-cloud');
+        const keywordCounts = {};
+        const stopwords = new Set([
+            'the','and','for','with','from','that','this','into','over','under','about','between','using',
+            'ai','artificial','intelligence','generative','model','models','paper','study','analysis','evidence',
+            'effects','impact','impacts','effects','work','future','jobs','job','labor','labour','market','markets',
+            'data','based','new','system','systems','approach','toward','towards','case','cases','review','evolution',
+            'of','in','on','to','a','an','is','are','by','as','at','be','or','we','our','their','they','it','its'
+        ]);
+        
+        state.papers.forEach(paper => {
+            if (Array.isArray(paper.keywords) && paper.keywords.length > 0) {
+                paper.keywords.forEach(k => {
+                    const key = utils.cleanText(k);
+                    if (key && key.length >= 4 && !stopwords.has(key)) {
+                        keywordCounts[key] = (keywordCounts[key] || 0) + 1;
+                    }
+                });
+                return;
+            }
+            
+            const text = `${paper.title || ''} ${paper.abstract || ''}`.toLowerCase();
+            const tokens = text.split(/[^a-z0-9]+/g).filter(Boolean);
+            tokens.forEach(token => {
+                if (token.length >= 4 && !stopwords.has(token)) {
+                    keywordCounts[token] = (keywordCounts[token] || 0) + 1;
+                }
+            });
+        });
+        
+        const sortedKeywords = Object.entries(keywordCounts)
+            .sort(([,a], [,b]) => b - a)
+            .slice(0, 40);
+        
+        if (sortedKeywords.length === 0) {
+            container.innerHTML = '<p>No keyword data available</p>';
+            return;
+        }
+        
+        const maxCount = Math.max(...sortedKeywords.map(([,c]) => c));
+        container.innerHTML = sortedKeywords.map(([keyword, count]) => {
+            const size = Math.min(12 + Math.round((count / maxCount) * 14), 26);
+            return `<span class="keyword-tag" style="font-size: ${size}px">
+                ${utils.escapeHtml(keyword)} (${count})
+            </span>`;
+        }).join('');
+    },
+
+    // Métricas clave para living review
+    renderKeyMetrics() {
+        const container = document.getElementById('key-metrics');
+        const total = state.papers.length;
+        if (total === 0) {
+            container.innerHTML = '<p>No data available</p>';
+            return;
+        }
+        
+        const now = Date.now();
+        const last30Days = state.papers.filter(p => {
+            const ts = Date.parse(p.addedDate || '');
+            return ts && (now - ts) <= 30 * 24 * 60 * 60 * 1000;
+        }).length;
+        const last90Days = state.papers.filter(p => {
+            const ts = Date.parse(p.addedDate || '');
+            return ts && (now - ts) <= 90 * 24 * 60 * 60 * 1000;
+        }).length;
+        
+        const years = state.papers.map(p => p.year).filter(Boolean);
+        const minYear = years.length ? Math.min(...years) : 'N/A';
+        const maxYear = years.length ? Math.max(...years) : 'N/A';
+        
+        const citations = state.papers.map(p => p.citations || 0);
+        const avgCitations = citations.length ? (citations.reduce((a, b) => a + b, 0) / citations.length) : 0;
+        const medianCitations = citations.length ? citations.sort((a, b) => a - b)[Math.floor(citations.length / 2)] : 0;
+        
+        container.innerHTML = `
+            <div class="metric-item">
+                <span class="metric-label">Total papers</span>
+                <span class="metric-value">${total}</span>
+            </div>
+            <div class="metric-item">
+                <span class="metric-label">New (30 days)</span>
+                <span class="metric-value">${last30Days}</span>
+            </div>
+            <div class="metric-item">
+                <span class="metric-label">New (90 days)</span>
+                <span class="metric-value">${last90Days}</span>
+            </div>
+            <div class="metric-item">
+                <span class="metric-label">Year range</span>
+                <span class="metric-value">${minYear}–${maxYear}</span>
+            </div>
+            <div class="metric-item">
+                <span class="metric-label">Avg citations</span>
+                <span class="metric-value">${avgCitations.toFixed(1)}</span>
+            </div>
+            <div class="metric-item">
+                <span class="metric-label">Median citations</span>
+                <span class="metric-value">${medianCitations}</span>
+            </div>
+        `;
+    },
+
+    // Producción anual
+    renderYearlyOutput() {
+        const container = document.getElementById('yearly-output');
+        const yearCounts = {};
+        
+        state.papers.forEach(paper => {
+            if (paper.year) {
+                yearCounts[paper.year] = (yearCounts[paper.year] || 0) + 1;
+            }
+        });
+        
+        const years = Object.keys(yearCounts).map(Number).sort((a, b) => a - b);
+        if (years.length === 0) {
+            container.innerHTML = '<p>No data available</p>';
+            return;
+        }
+        
+        const maxCount = Math.max(...Object.values(yearCounts));
+        container.innerHTML = years.map(year => {
+            const count = yearCounts[year];
+            const percentage = maxCount ? Math.round((count / maxCount) * 100) : 0;
+            return `
+                <div class="bar-item">
+                    <span class="bar-label">${year}</span>
+                    <div class="bar-track">
+                        <div class="bar-fill" style="width: ${percentage}%"></div>
+                    </div>
+                    <span class="bar-value">${count}</span>
+                </div>
+            `;
+        }).join('');
     },
     
     // Renderizar nube de temas
@@ -1582,6 +1920,45 @@ const uiManager = {
                     </div>
                 `;
             }).join('');
+    },
+
+    // Calidad y cobertura
+    renderQualityCoverage() {
+        const container = document.getElementById('quality-coverage');
+        const total = state.papers.length;
+        if (total === 0) {
+            container.innerHTML = '<p>No data available</p>';
+            return;
+        }
+        
+        const withAbstract = state.papers.filter(p => utils.hasMeaningfulAbstract(p.abstract || '')).length;
+        const withDoi = state.papers.filter(p => p.doi).length;
+        const withUrl = state.papers.filter(p => p.url).length;
+        const aheadOfPrint = state.papers.filter(p => utils.isAheadOfPrint(`${p.title || ''} ${p.abstract || ''}`)).length;
+        
+        const abstractPct = ((withAbstract / total) * 100).toFixed(1);
+        const doiPct = ((withDoi / total) * 100).toFixed(1);
+        const urlPct = ((withUrl / total) * 100).toFixed(1);
+        const aopPct = ((aheadOfPrint / total) * 100).toFixed(1);
+        
+        container.innerHTML = `
+            <div class="metric-item">
+                <span class="metric-label">Abstract coverage</span>
+                <span class="metric-value">${abstractPct}%</span>
+            </div>
+            <div class="metric-item">
+                <span class="metric-label">DOI coverage</span>
+                <span class="metric-value">${doiPct}%</span>
+            </div>
+            <div class="metric-item">
+                <span class="metric-label">URL coverage</span>
+                <span class="metric-value">${urlPct}%</span>
+            </div>
+            <div class="metric-item">
+                <span class="metric-label">Ahead of print</span>
+                <span class="metric-value">${aopPct}%</span>
+            </div>
+        `;
     },
 
     // ===== FUNCIONES DE SELECCIÓN =====
