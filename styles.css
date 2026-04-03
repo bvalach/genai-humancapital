@@ -960,9 +960,18 @@ body {
     transition: background var(--duration) var(--ease), color var(--duration) var(--ease);
 }
 
-.topic-tag:hover {
+.topic-tag:hover,
+.clickable-tag:hover {
     background: var(--primary-glow);
     color: var(--primary);
+    transform: translateY(-1px);
+}
+
+.clickable-tag {
+    cursor: pointer;
+    transition: background var(--duration) var(--ease),
+                color var(--duration) var(--ease),
+                transform var(--duration) var(--ease);
 }
 
 /* Keyword tags */

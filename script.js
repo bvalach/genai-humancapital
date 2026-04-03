@@ -1034,6 +1034,17 @@ const uiManager = {
         });
     },
     
+    // Search papers from a keyword/topic tag click
+    searchFromTag(term) {
+        const searchInput = document.getElementById('search-input');
+        searchInput.value = term;
+        state.filters.search = term;
+        state.currentPage = 1;
+        this.switchTab('papers');
+        this.renderPapers();
+        searchInput.focus();
+    },
+
     // Cambiar tab
     switchTab(tabId) {
         // Actualizar navegación
@@ -1717,10 +1728,13 @@ const uiManager = {
         const maxCount = Math.max(...sortedKeywords.map(([,c]) => c));
         container.innerHTML = sortedKeywords.map(([keyword, count]) => {
             const size = Math.min(12 + Math.round((count / maxCount) * 14), 26);
-            return `<span class="keyword-tag" style="font-size: ${size}px">
+            return `<span class="keyword-tag clickable-tag" data-search="${utils.escapeHtml(keyword)}" style="font-size: ${size}px; cursor:pointer;" title="Search papers for '${utils.escapeHtml(keyword)}'">
                 ${utils.escapeHtml(keyword)} (${count})
             </span>`;
         }).join('');
+        container.querySelectorAll('.clickable-tag').forEach(tag => {
+            tag.addEventListener('click', () => this.searchFromTag(tag.dataset.search));
+        });
     },
 
     // Métricas clave para living review
@@ -1827,11 +1841,14 @@ const uiManager = {
             .sort(([,a], [,b]) => b - a)
             .slice(0, 20);
         
-        container.innerHTML = sortedTopics.map(([topic, count]) => 
-            `<span class="topic-tag" style="font-size: ${Math.min(12 + count * 2, 24)}px">
+        container.innerHTML = sortedTopics.map(([topic, count]) =>
+            `<span class="topic-tag clickable-tag" data-search="${utils.escapeHtml(topic)}" style="font-size: ${Math.min(12 + count * 2, 24)}px; cursor:pointer;" title="Search papers for '${utils.escapeHtml(topic)}'">
                 ${utils.escapeHtml(topic)} (${count})
              </span>`
         ).join('');
+        container.querySelectorAll('.clickable-tag').forEach(tag => {
+            tag.addEventListener('click', () => this.searchFromTag(tag.dataset.search));
+        });
     },
     
     // Renderizar autores destacados
