@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Living Review: Generative AI and the Future of Work | Dra. Beatriz Vallina</title>
     <meta name="description" content="Dynamic literature review on the impact of generative artificial intelligence on employment and the future of work. PhD research by Dra. Beatriz Vallina, Universitat Politècnica de València">
     <link rel="stylesheet" href="styles.css">
-    <link href="https://fonts.googleapis.com/css2?family=Raleway:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
@@ -14,10 +14,9 @@
     <header class="header">
         <div class="container">
             <div class="header-content">
-                <h1 class="title">
-                    Living Review: Generative AI and the Future of Work
-                </h1>
-                <p class="subtitle">Dynamic literature review encompassing academic papers and grey literature on AI's impact on employment</p>
+                <span class="header-eyebrow">Living Literature Review</span>
+                <h1>Generative AI &amp; the Future of Work</h1>
+                <p class="subtitle">Dynamic literature review encompassing academic papers and grey literature on AI's impact on employment, human capital and labour markets</p>
                 <div class="header-stats">
                     <div class="stat">
                         <span class="stat-number" id="total-papers">0</span>
@@ -32,6 +31,15 @@
                         <span class="stat-label">Grey Literature</span>
                     </div>
                 </div>
+                <div class="header-info">
+                    <div class="info-box info-loading">
+                        <p><strong>Live data.</strong> Papers are fetched from Semantic Scholar, CrossRef &amp; OpenAlex. Loading may take a moment.</p>
+                    </div>
+                    <div class="info-box info-author">
+                        <p><strong>Beatriz Vallina, PhD</strong> &mdash; Universitat Polit&egrave;cnica de Val&egrave;ncia</p>
+                        <p class="info-secondary">Supervisors: Roberto Cervelló, Prof.PhD &amp; Juan José Llul, PhD</p>
+                    </div>
+                </div>
             </div>
         </div>
     </header>
@@ -39,6 +47,7 @@
     <!-- Navigation -->
     <nav class="nav">
         <div class="container">
+            <span class="nav-brand">workAI</span>
             <div class="nav-tabs">
                 <button class="nav-tab active" data-tab="papers">
                     <i class="fas fa-file-alt"></i>
@@ -49,10 +58,11 @@
                     Trends
                 </button>
                 <button class="nav-tab" data-tab="litmaps">
-                    <i class="fas fa-map"></i>
+                    <i class="fas fa-project-diagram"></i>
                     LitMaps
                 </button>
             </div>
+            <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme" title="Toggle dark/light theme">&#9728;</button>
         </div>
     </nav>
 
@@ -68,7 +78,7 @@
                         <i class="fas fa-sync-alt"></i>
                     </button>
                 </div>
-                
+
                 <div class="filters">
                     <select id="year-filter">
                         <option value="">All years</option>
@@ -78,7 +88,7 @@
                         <option value="2023">2023</option>
                         <option value="2022">2022</option>
                     </select>
-                    
+
                     <select id="type-filter">
                         <option value="">All types</option>
                         <option value="journal">Journal article</option>
@@ -87,20 +97,20 @@
                         <option value="working-paper">Working paper</option>
                         <option value="book">Book</option>
                     </select>
-                    
+
                     <select id="sort-filter">
                         <option value="relevance">Relevance</option>
                         <option value="date">Date</option>
                         <option value="citations">Citations</option>
                         <option value="impact">Impact</option>
                     </select>
-                    
+
                     <button id="clear-filters" class="clear-btn">
                         <i class="fas fa-times"></i>
                         Clear
                     </button>
                 </div>
-                
+
                 <div class="selection-controls">
                     <div class="selection-info">
                         <span id="selected-count">0</span> papers selected
@@ -116,11 +126,11 @@
                         </button>
                         <button id="download-csv" class="download-btn" disabled>
                             <i class="fas fa-download"></i>
-                            Download CSV
+                            CSV
                         </button>
                         <button id="download-ris" class="download-btn" disabled>
                             <i class="fas fa-download"></i>
-                            Download RIS
+                            RIS
                         </button>
                     </div>
                 </div>
@@ -191,11 +201,11 @@
                         <h3>Literature Map</h3>
                         <p>Interactive visualization of research connections and citations in our field.</p>
                         <div class="litmaps-embed">
-                            <iframe 
-                                src="https://app.litmaps.com/shared/b55aac42-d7a3-42af-b34b-31c01ac04ce7" 
-                                width="100%" 
-                                height="600" 
-                                frameborder="0" 
+                            <iframe
+                                src="https://app.litmaps.com/shared/b55aac42-d7a3-42af-b34b-31c01ac04ce7"
+                                width="100%"
+                                height="600"
+                                frameborder="0"
                                 allowfullscreen
                                 title="LitMaps - Generative AI and Future of Work Literature Map">
                             </iframe>
@@ -209,11 +219,11 @@
     <!-- Footer -->
     <footer class="footer">
         <div class="container">
-            <p>&copy; 2025 Living Review - Generative AI and the Future of Work</p>
-            <p><strong>Research by:</strong> <a href="https://www.linkedin.com/in/beatrizvallina/" target="_blank">Beatriz Vallina, PhD</a></p>
-            <p><strong>Thesis Supervisors:</strong> Roberto Cervelló, Prof.PhD & Juan José Llul, PhD</p>
+            <p>&copy; 2025 Living Review &mdash; Generative AI and the Future of Work</p>
+            <p><strong>Research by:</strong> <a href="https://www.linkedin.com/in/beatrizvallina/" target="_blank" rel="noopener">Beatriz Vallina, PhD</a></p>
+            <p><strong>Supervisors:</strong> Roberto Cervelló, Prof.PhD &amp; Juan José Llul, PhD</p>
             <p><strong>Institution:</strong> Doctorate in Agrifood Economics, Universitat Politècnica de València</p>
-            <p><strong>Related Work:</strong> <a href="https://bvalach.github.io/genai-agrifood/index.html" target="_blank">Living Review on Generative AI in the Food Chain</a></p>
+            <p><strong>Related:</strong> <a href="https://bvalach.github.io/genai-agrifood/index.html" target="_blank" rel="noopener">Living Review on Generative AI in the Food Chain</a></p>
             <p><strong>Sources:</strong> Semantic Scholar, CrossRef, OpenAlex, World Bank, OECD, McKinsey Global Institute</p>
         </div>
     </footer>
@@ -242,6 +252,7 @@
     </div>
 
     <!-- Scripts -->
+    <script src="theme.js"></script>
     <script src="script.js"></script>
 </body>
-</html> 
+</html>
