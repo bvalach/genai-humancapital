@@ -107,10 +107,19 @@ const CONFIG = {
     }
 };
 
+function parseStoredArray(storageKey) {
+    try {
+        const parsed = JSON.parse(localStorage.getItem(storageKey) || '[]');
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+}
+
 // ===== ESTADO GLOBAL =====
 const state = {
-    papers: JSON.parse(localStorage.getItem('livingReview_papers') || '[]'),
-    grayLiterature: JSON.parse(localStorage.getItem('livingReview_gray') || '[]'),
+    papers: parseStoredArray('livingReview_papers'),
+    grayLiterature: parseStoredArray('livingReview_gray'),
     currentTab: 'papers',
     currentPage: 1,
     filters: {
@@ -829,6 +838,39 @@ const apiService = {
 
 // ===== GESTIÓN DE DATOS =====
 const dataManager = {
+    hydratePaper(paper, options = {}) {
+        const validatedPaper = utils.validatePaperData(paper);
+        if (!validatedPaper || !validatedPaper.title) return null;
+
+        const storedDate = Date.parse(paper?.addedDate || '');
+        validatedPaper.addedDate = storedDate ? new Date(storedDate).toISOString() : new Date().toISOString();
+        validatedPaper.relevanceScore = utils.validateInput(
+            paper?.relevanceScore ?? validatedPaper.relevanceScore,
+            'number'
+        );
+        if (!validatedPaper.relevanceScore) {
+            validatedPaper.relevanceScore = utils.calculateRelevanceScore(validatedPaper);
+        }
+        validatedPaper.categories = validatedPaper.categories.length > 0
+            ? validatedPaper.categories
+            : utils.categorizePaper(validatedPaper);
+        validatedPaper.isGrayLit = options.forceGrayLit === true
+            ? true
+            : paper?.isGrayLit === true || utils.isGrayLiterature(validatedPaper);
+
+        return validatedPaper;
+    },
+
+    loadFromStorage() {
+        state.papers = state.papers
+            .map(paper => this.hydratePaper(paper))
+            .filter(Boolean);
+
+        state.grayLiterature = state.grayLiterature
+            .map(paper => this.hydratePaper(paper, { forceGrayLit: true }))
+            .filter(Boolean);
+    },
+
     // Guardar en localStorage
     saveToStorage() {
         localStorage.setItem('livingReview_papers', JSON.stringify(state.papers));
@@ -937,6 +979,7 @@ const dataManager = {
 const uiManager = {
     // Inicializar eventos
     init() {
+        dataManager.loadFromStorage();
         this.bindEvents();
         this.updateStats();
         this.renderPapers();
@@ -1165,11 +1208,9 @@ const uiManager = {
         card.style.position = 'relative';
         card.dataset.id = paper.id;
         
-        // Sanitise data
-        const safeTitle = utils.escapeHtml(utils.truncateText(paper.title || 'Untitled', 200));
-        const safeAuthors = utils.escapeHtml(utils.truncateText(paper.authors || 'Unknown authors', 150));
-        const safeYear = paper.year || 'N/A';
-        const safeAbstract = utils.escapeHtml(utils.truncateText(paper.abstract || '', 300));
+        const safeYear = utils.validateInput(paper.year, 'year') || 'N/A';
+        const safeCitations = utils.validateInput(paper.citations, 'number');
+        const safeScore = Math.min(utils.validateInput(paper.relevanceScore, 'number'), 100);
         
         // Badge de fuente
         const sourceClass = paper.isGrayLit ? 'gray-literature' : 'academic';
@@ -1203,20 +1244,24 @@ const uiManager = {
         // Meta información
         const metaElement = document.createElement('div');
         metaElement.className = 'paper-meta';
-        metaElement.innerHTML = `
-            <span class="paper-year">
-                <i class="fas fa-calendar"></i>
-                ${safeYear}
-            </span>
-            <span class="paper-type">
-                <i class="fas fa-tag"></i>
-                ${this.getTypeLabel(paper.type)}
-            </span>
-            <span class="paper-citations">
-                <i class="fas fa-quote-right"></i>
-                ${paper.citations || 0} citations
-            </span>
-        `;
+        const yearElement = document.createElement('span');
+        yearElement.className = 'paper-year';
+        yearElement.innerHTML = '<i class="fas fa-calendar"></i>';
+        yearElement.append(` ${safeYear}`);
+
+        const typeElement = document.createElement('span');
+        typeElement.className = 'paper-type';
+        typeElement.innerHTML = '<i class="fas fa-tag"></i>';
+        typeElement.append(` ${this.getTypeLabel(paper.type)}`);
+
+        const citationsElement = document.createElement('span');
+        citationsElement.className = 'paper-citations';
+        citationsElement.innerHTML = '<i class="fas fa-quote-right"></i>';
+        citationsElement.append(` ${safeCitations} citations`);
+
+        metaElement.appendChild(yearElement);
+        metaElement.appendChild(typeElement);
+        metaElement.appendChild(citationsElement);
         
         // Abstract (si existe)
         let abstractElement = null;
@@ -1242,15 +1287,27 @@ const uiManager = {
         // Footer con score
         const footerElement = document.createElement('div');
         footerElement.className = 'paper-footer';
-        footerElement.innerHTML = `
-            <div class="paper-score">
-                <span>Score:</span>
-                <div class="score-bar">
-                    <div class="score-fill" style="width: ${paper.relevanceScore || 0}%"></div>
-                </div>
-                <span>${paper.relevanceScore || 0}</span>
-            </div>
-        `;
+        const scoreWrapper = document.createElement('div');
+        scoreWrapper.className = 'paper-score';
+
+        const scoreLabel = document.createElement('span');
+        scoreLabel.textContent = 'Score:';
+
+        const scoreBar = document.createElement('div');
+        scoreBar.className = 'score-bar';
+
+        const scoreFill = document.createElement('div');
+        scoreFill.className = 'score-fill';
+        scoreFill.style.width = `${safeScore}%`;
+        scoreBar.appendChild(scoreFill);
+
+        const scoreValue = document.createElement('span');
+        scoreValue.textContent = String(safeScore);
+
+        scoreWrapper.appendChild(scoreLabel);
+        scoreWrapper.appendChild(scoreBar);
+        scoreWrapper.appendChild(scoreValue);
+        footerElement.appendChild(scoreWrapper);
         
         // Ensamblar tarjeta
         card.appendChild(sourceBadge);
